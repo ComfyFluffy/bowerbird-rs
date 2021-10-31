@@ -1,0 +1,34 @@
+[package]
+name = "bowerbird"
+version = "0.1.0"
+authors = ["WOo0W <24245520+WOo0W@users.noreply.github.com>"]
+edition = "2018"
+
+[workspace]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mongodb = "2"
+bson = { version = "2", features = ["chrono-0_4"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+color-thief = "0.2"
+image = "0.23"
+regex = "1"
+colored = "2"
+pixivcrab = { path = "../pixivcrab" }
+clap = "3.0.0-beta.5"
+dirs = "4"
+serde_json = "1"
+snafu = { version = "0.6", features = ["backtraces"] }
+reqwest = { version = "0.11" }
+lazy_static = "1"
+sanitize-filename = "0.3"
+crossbeam = "0.8"
+url = "2"
+bytes = "1"
+mime_guess = "2"
+path-slash = "0.1.4"
