@@ -7,7 +7,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
-        Arc,
+        Arc, Mutex, RwLock,
     },
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -22,7 +22,7 @@ use tokio::{
     fs::{self, File},
     io::{AsyncSeekExt, AsyncWriteExt},
     spawn,
-    sync::{mpsc, Mutex, RwLock, Semaphore},
+    sync::{mpsc, Semaphore},
     task::JoinHandle,
 };
 
@@ -57,7 +57,7 @@ impl WaitGroup {
     }
 
     pub fn done(&self) {
-        if self.0.num.fetch_sub(1, SeqCst) - 1 == 0 {
+        if self.0.num.fetch_sub(1, SeqCst) <= 1 {
             self.0.waker.wake();
         }
     }
@@ -72,7 +72,7 @@ impl Future for WaitGroup {
         }
         self.0.waker.register(cx.waker());
         if self.0.num.load(SeqCst) == 0 {
-            return Poll::Ready(());
+            Poll::Ready(())
         } else {
             Poll::Pending
         }
@@ -85,9 +85,9 @@ pub struct Downloader {
 
     tasks_finished: Arc<RwLock<BTreeMap<u64, Task>>>,
     tasks_pending: Arc<RwLock<BTreeMap<u64, Task>>>,
-    tasks_running: Arc<std::sync::Mutex<BTreeMap<u64, JoinHandle<()>>>>,
+    tasks_running: Arc<Mutex<BTreeMap<u64, JoinHandle<()>>>>,
     // Use mutex for sender to ensure ordering.
-    task_sender: Arc<Mutex<mpsc::Sender<Task>>>,
+    task_sender: Arc<tokio::sync::Mutex<mpsc::Sender<Task>>>,
     semaphore: Arc<Semaphore>,
     waitgroup: WaitGroup,
     main_handle: Option<JoinHandle<()>>,
@@ -226,9 +226,9 @@ impl Downloader {
         let mut downloader = Downloader {
             client: client.clone(),
             tasks_finished: Arc::new(RwLock::new(BTreeMap::new())),
-            tasks_pending: Arc::new(RwLock::new(BTreeMap::new())),
-            tasks_running: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
-            task_sender: Arc::new(Mutex::new(task_sender)),
+            tasks_pending: Arc::new(std::sync::RwLock::new(BTreeMap::new())),
+            tasks_running: Arc::new(Mutex::new(BTreeMap::new())),
+            task_sender: Arc::new(tokio::sync::Mutex::new(task_sender.clone())),
             semaphore: Arc::new(Semaphore::new(threads)),
             waitgroup: WaitGroup::new(),
             main_handle: None,
@@ -239,14 +239,13 @@ impl Downloader {
         let tasks_running = Arc::clone(&downloader.tasks_running);
         let sem = Arc::clone(&downloader.semaphore);
         let client = downloader.client.clone();
-        let task_sender = Arc::clone(&downloader.task_sender);
         let waitgroup = downloader.waitgroup.clone();
 
         downloader.main_handle = Some(spawn(async move {
             while let Some(mut task) = task_receiver.recv().await {
                 match sem.clone().try_acquire_owned() {
                     Ok(permit) => {
-                        let task_sender = Arc::clone(&task_sender);
+                        let task_sender = task_sender.clone();
                         let tasks_finished = Arc::clone(&tasks_finished);
                         let tasks_pending = Arc::clone(&tasks_pending);
                         let client = client.clone();
@@ -259,13 +258,13 @@ impl Downloader {
                             task.status = TaskStatus::Running;
                             match Self::download(client, &mut task).await {
                                 Err(e) => {
-                                    error!("Downloader: Task {} error: {:?}", task.id(), e);
+                                    error!("Downloader: Task {} error: \n{:?}", task.id(), e);
                                     task.status = TaskStatus::Error(e);
                                     if let Some(ref mut hooks) = task.hooks {
                                         if let Some(on_error) = hooks.on_error.take() {
                                             if let Err(e) = on_error(&task).await {
                                                 error!(
-                                                    "Downloader: Task {} hook error: {:?}",
+                                                    "Downloader: Task {} hook error: \n{:?}",
                                                     task.id(),
                                                     e
                                                 )
@@ -300,7 +299,7 @@ impl Downloader {
                                                 if let Some(on_success) = hooks.on_success.take() {
                                                     if let Err(e) = on_success(&task).await {
                                                         error!(
-                                                            "Downloader: Task {} hook error: {:?}",
+                                                            "Downloader: Task {} hook error: \n{:?}",
                                                             task.id(),
                                                             e
                                                         )
@@ -315,29 +314,41 @@ impl Downloader {
                             }
                             // TODO: try to write a macro
 
-                            tasks_finished.write().await.insert(task.id, task);
+                            {
+                                tasks_finished.write().unwrap().insert(task.id, task);
+                            }
 
                             // We need not to care about the sending result here.
-                            #[allow(unused_must_use)]
-                            if let Some((_, task)) = tasks_pending.write().await.pop_first() {
-                                let locked_sender = task_sender.lock().await;
+                            // #[allow(unused_must_use)]
+                            if let Some((_, task)) = {
+                                let mut lock = tasks_pending.write().unwrap();
+                                let task = lock.pop_first();
+                                task
+                            } {
                                 // Lock the task_sender here to ensure that the task from tasks_pending
                                 // will be execute in the next iteration.
                                 drop(permit);
                                 // Drop the permit before sending the task to make
                                 // next try_acquire_owned() success.
-                                locked_sender.send(task).await;
+                                task_sender.send(task).await.unwrap();
                             }
-                            tasks_running_cloned.lock().unwrap().remove(&task_id);
+                            {
+                                tasks_running_cloned.lock().unwrap().remove(&task_id);
+                            }
                             waitgroup.done();
                         });
-                        tasks_running.lock().unwrap().insert(task_id, handle);
+                        {
+                            tasks_running.lock().unwrap().insert(task_id, handle);
+                        }
                     }
                     Err(tokio::sync::TryAcquireError::Closed) => {
                         break;
                     }
                     Err(tokio::sync::TryAcquireError::NoPermits) => {
-                        tasks_pending.write().await.insert(task.id, task);
+                        // let task_id = task.id;
+                        // debug!("m {} task will send", task_id)/;
+                        tasks_pending.write().unwrap().insert(task.id, task);
+                        // debug!("m {} task sent", task_id);
                     }
                 }
             }
@@ -347,22 +358,23 @@ impl Downloader {
     }
 
     pub async fn send_one(&self, task: Task) {
-        debug!("Sending task {:?}", task);
-        self.task_sender.lock().await.send(task).await.unwrap();
+        // debug!("Sending task {:?}", task);
         self.waitgroup.add(1);
+        self.task_sender.lock().await.send(task).await.unwrap();
     }
 
     pub async fn send(&self, tasks: Vec<Task>) {
-        debug!("Sending tasks {:?}", tasks);
+        // debug!("Sending tasks {:?}", tasks);
         if tasks.is_empty() {
             return;
         }
-        let lock = self.task_sender.lock().await;
-        let len = tasks.len();
+        self.waitgroup.add(tasks.len());
         for task in tasks {
-            lock.send(task).await.unwrap();
+            // let task_id = task.id;
+            // debug!("send {} task_sender will send", task_id);
+            self.task_sender.lock().await.send(task).await.unwrap();
+            // debug!("send {} task_sender sent", task_id);
         }
-        self.waitgroup.add(len)
     }
 
     /// Wait for all sent tasks to finish.

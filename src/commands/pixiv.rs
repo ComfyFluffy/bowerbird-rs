@@ -197,7 +197,26 @@ async fn illusts<'a>(
 
     let mut users_need_update_set = BTreeSet::new();
 
-    'wh: while let Some(r) = pager.next().await.context(error::PixivAPI)? {
+    'wh: while let Some(r) = {
+        let mut tries = 0;
+        let resp;
+        loop {
+            tries += 1;
+            match pager.next().await.context(error::PixivAPI) {
+                Ok(r) => {
+                    resp = r;
+                    break;
+                }
+                Err(e) => {
+                    if tries >= 3 {
+                        return Err(e);
+                    }
+                    warn!("{}", e)
+                }
+            }
+        }
+        resp
+    } {
         let mut ugoiras = Vec::new();
         let mut tags_set = HashSet::new();
         let mut users = BTreeMap::new();
@@ -458,6 +477,7 @@ async fn illusts<'a>(
 
     for user_id in users_need_update_set {
         update_user_detail(api, &user_id, &c_user).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 
     Ok(())
@@ -473,7 +493,7 @@ pub async fn update_user_detail(
     let user = PUser {
         last_modified: Some(DateTime::now()),
         extension: Some(PixivUser {
-            is_followed: resp.user.is_followed,
+            is_followed: resp.user.is_followed.unwrap_or_default(),
             total_following: Some(resp.profile.total_follow_users),
             total_illust_series: Some(resp.profile.total_illust_series),
             total_illusts: Some(resp.profile.total_illusts),

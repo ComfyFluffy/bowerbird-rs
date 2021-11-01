@@ -95,6 +95,9 @@ pub async fn run() -> crate::Result<()> {
                 let api = pixivcrab::AppAPI::new(
                     AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
                     &config.pixiv.language,
+                    reqwest::ClientBuilder::new()
+                        .danger_accept_invalid_certs(true)
+                        .proxy(reqwest::Proxy::https("http://192.168.233.128:8888").unwrap()),
                 )
                 .context(error::PixivAPI)?;
                 Ok((config, db, api))

@@ -27,7 +27,6 @@ snafu = { version = "0.6", features = ["backtraces"] }
 reqwest = { version = "0.11" }
 lazy_static = "1"
 sanitize-filename = "0.3"
-crossbeam = "0.8"
 url = "2"
 bytes = "1"
 mime_guess = "2"

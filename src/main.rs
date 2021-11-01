@@ -6,7 +6,7 @@ use bowerbird::error;
 async fn main() {
     match bowerbird::cli::run().await {
         Err(e) => {
-            error!("{:?}", e);
+            error!("\n{:?}", e);
             process::exit(1);
         }
         _ => {}
