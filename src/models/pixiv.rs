@@ -59,7 +59,7 @@ pub struct PixivWorks {
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PixivIllustHistory {
-    pub illust_type: String, // TODO: use enum type
+    pub illust_type: String,
     pub caption_html: String,
     pub title: String,
     pub image_urls: Vec<String>,

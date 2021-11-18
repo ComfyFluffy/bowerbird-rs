@@ -1,10 +1,9 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process};
 
 use clap::Parser;
-use pixivcrab::AuthMethod;
 use snafu::ResultExt;
 
-use crate::{commands, config, error};
+use crate::{commands, config, error, log::error};
 
 #[derive(Parser)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
@@ -54,10 +53,7 @@ struct PixivIllustBookmarks {
     private: bool,
 }
 
-// #[derive(Parser)]
-// struct PixivIllustUploads {}
-
-pub async fn run() -> crate::Result<()> {
+async fn run_internal() -> crate::Result<()> {
     let opts = Main::parse();
 
     let config_builder = || {
@@ -88,38 +84,52 @@ pub async fn run() -> crate::Result<()> {
             config_builder()?;
         }
         SubcommandMain::Pixiv(c) => {
+            use pixivcrab::AuthMethod;
             let user_id = c.user_id;
             let limit = c.limit;
             let pre_fn = async {
-                let (db, config) = pre_fn.await?;
+                let (db, mut config) = pre_fn.await?;
+                let mut api_client = reqwest::ClientBuilder::new();
+                if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
+                    api_client = api_client.proxy(proxy);
+                }
                 let api = pixivcrab::AppAPI::new(
                     AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
                     &config.pixiv.language,
-                    reqwest::ClientBuilder::new()
-                        .danger_accept_invalid_certs(true)
-                        .proxy(reqwest::Proxy::https("http://192.168.233.128:8888").unwrap()),
+                    api_client
+                        // .danger_accept_invalid_certs(true)
+                        // .proxy(reqwest::Proxy::https("http://192.168.233.128:8888").unwrap()),
                 )
                 .context(error::PixivAPI)?;
-                Ok((config, db, api))
+                let auth_result = api.auth().await.context(error::PixivAPI)?;
+                config.pixiv.refresh_token = auth_result.refresh_token;
+                config.save()?;
+                let selected_user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());
+                Ok((config, db, api, selected_user_id))
             };
-            // TODO: Save refresh_token
             match &c.subcommand {
                 SubcommandPixiv::Illust(c) => {
                     let pre_fn = async {
-                        let (config, db, api) = pre_fn.await?;
-                        let downloader =
-                            crate::downloader::Downloader::new(reqwest::Client::default(), 5);
-                        Ok((config, db, api, downloader))
+                        let (config, db, api, selected_user_id) = pre_fn.await?;
+                        let mut downloader_client = reqwest::ClientBuilder::new();
+                        if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
+                            downloader_client = downloader_client.proxy(proxy);
+                        }
+                        let downloader = crate::downloader::Downloader::new(
+                            downloader_client.build().context(error::DownloadHTTP)?,
+                            5,
+                        );
+                        Ok((config, db, api, selected_user_id, downloader))
                     };
                     match &c.subcommand {
                         SubcommandPixivIllust::Bookmarks(c) => {
-                            let (config, db, api, downloader) = pre_fn.await?;
+                            let (config, db, api, selected_user_id, downloader) = pre_fn.await?;
                             commands::pixiv::illust_bookmarks(
                                 &api,
                                 &db,
                                 &downloader,
                                 config.sub_dir(&config.pixiv.storage_dir),
-                                user_id,
+                                &selected_user_id,
                                 c.private,
                                 limit,
                             )
@@ -127,13 +137,13 @@ pub async fn run() -> crate::Result<()> {
                             downloader.wait().await;
                         }
                         SubcommandPixivIllust::Uploads => {
-                            let (config, db, api, downloader) = pre_fn.await?;
+                            let (config, db, api, selected_user_id, downloader) = pre_fn.await?;
                             commands::pixiv::illust_uploads(
                                 &api,
                                 &db,
                                 &downloader,
                                 config.sub_dir(&config.pixiv.storage_dir),
-                                user_id,
+                                &selected_user_id,
                                 limit,
                             )
                             .await?;
@@ -146,4 +156,15 @@ pub async fn run() -> crate::Result<()> {
     };
 
     Ok(())
+}
+
+#[tokio::main]
+pub async fn run() {
+    match run_internal().await {
+        Err(e) => {
+            error!("\n{:?}", e);
+            process::exit(1);
+        }
+        _ => {}
+    };
 }

@@ -1,7 +1,8 @@
 use chrono::{Duration, Utc};
 use futures::FutureExt;
 use image::GenericImageView;
-use pixivcrab::AppAPI;
+use pixivcrab::{AppAPI, Pager};
+use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
@@ -13,13 +14,14 @@ use snafu::ResultExt;
 
 use crate::{
     downloader::{Task, TaskHooks, TaskOptions},
-    error, info,
+    error,
+    log::{info, warning},
     models::{
         self,
-        pixiv::{PixivIllustHistory, PixivUser, PixivUserHistory, PixivWorks},
+        pixiv::{PixivIllustHistory, PixivNovelHistory, PixivUser, PixivUserHistory, PixivWorks},
         History, ImageMedia, Item, LocalMedia,
     },
-    warn, Result,
+    Result,
 };
 
 use mongodb::{
@@ -60,7 +62,7 @@ macro_rules! try_skip {
         match $res {
             Ok(val) => val,
             Err(e) => {
-                warn!("{}", e);
+                warning!("{}", e);
                 continue;
             }
         }
@@ -69,7 +71,7 @@ macro_rules! try_skip {
 
 type PUser = Item<PixivUser, PixivUserHistory>;
 type PIllust = Item<PixivWorks, PixivIllustHistory>;
-// type PNovel = Item<PixivWorks, PixivNovelHistory>;
+type PNovel = Item<PixivWorks, PixivNovelHistory>;
 
 fn task_from_illust(
     api: &AppAPI,
@@ -183,6 +185,162 @@ fn task_from_illust(
     ))
 }
 
+async fn retry_pager<'a, T>(pager: &mut Pager<'a, T>, max_tries: i32) -> crate::Result<Option<T>>
+where
+    T: DeserializeOwned + pixivcrab::NextUrl,
+{
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        match pager.next().await.context(error::PixivAPI) {
+            Ok(r) => {
+                return Ok(r);
+            }
+            Err(e) => {
+                if tries >= max_tries {
+                    return Err(e);
+                }
+                warning!("{}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
+async fn update_users(
+    users_map: BTreeMap<String, &pixivcrab::models::user::User>,
+    users_need_update_set: &mut BTreeSet<String>,
+    c_user: &Collection<Document>,
+) -> crate::Result<HashMap<String, ObjectId>> {
+    let mut users_to_oid = HashMap::new();
+
+    for (user_id, user) in users_map {
+        let r = c_user
+            .find_one_and_update(
+                doc! {"source_id": &user_id},
+                doc! {"$set": {
+                    "source_inaccessible": false,
+                    "extension.is_followed": user.is_followed,
+                }},
+                FindOneAndUpdateOptions::builder()
+                    .upsert(true)
+                    .return_document(options::ReturnDocument::After)
+                    .projection(doc! {
+                        "_id": true,
+                        "last_modified": true,
+                        "history.extension.avatar_url": true,
+                    })
+                    .build(),
+            )
+            .await
+            .context(error::MongoDB)?
+            .ok_or(error::MongoNotMatch.build())?;
+        let parent_id = r.get_object_id("_id").context(error::MongoValueAccess)?;
+        users_to_oid.insert(user_id.clone(), parent_id);
+
+        if let Ok(last_modified) = r.get_datetime("last_modified") {
+            if last_modified.to_chrono() <= Utc::now() - Duration::weeks(1) {
+                users_need_update_set.insert(user_id);
+                continue;
+            }
+        } else {
+            users_need_update_set.insert(user_id);
+            continue;
+        }
+        if let Ok(histories) = r.get_array("history") {
+            if let Some(h) = histories.last() {
+                let s = h
+                    .as_document()
+                    .ok_or(error::MongoNotMatch.build())?
+                    .get_document("extension")
+                    .context(error::MongoValueAccess)?
+                    .get_str("avatar_url")
+                    .context(error::MongoValueAccess)?;
+                if s != user.profile_image_urls.medium {
+                    users_need_update_set.insert(user_id);
+                }
+            } else {
+                users_need_update_set.insert(user_id);
+            }
+        } else {
+            users_need_update_set.insert(user_id);
+        }
+    }
+    Ok(users_to_oid)
+}
+
+async fn update_tags(
+    tags_set: HashSet<Vec<String>>,
+    c_tag: &Collection<Document>,
+) -> crate::Result<HashMap<String, ObjectId>> {
+    let mut tags_to_oid = HashMap::new();
+    for alias in tags_set {
+        let regs: Vec<bson::Regex> = alias
+            .iter()
+            .map(|a| bson::Regex {
+                pattern: format!("^{}$", regex::escape(a)),
+                options: "i".to_string(),
+            })
+            .collect();
+        let r = c_tag
+            .find_one_and_update(
+                doc! { "alias": { "$in": regs }, "protected": false },
+                doc! { "$addToSet": {"alias": { "$each": &alias } } },
+                FindOneAndUpdateOptions::builder()
+                    .upsert(true)
+                    .return_document(options::ReturnDocument::After)
+                    .projection(doc! {"_id": true})
+                    .build(),
+            )
+            .await
+            .context(error::MongoDB)?
+            .ok_or(error::MongoNotMatch.build())?;
+        for t in alias {
+            let oid = r.get_object_id("_id").context(error::MongoValueAccess)?;
+            tags_to_oid.insert(t, oid);
+        }
+    }
+    Ok(tags_to_oid)
+}
+
+fn insert_tags_to_alias(tags: &Vec<pixivcrab::models::Tag>, tags_set: &mut HashSet<Vec<String>>) {
+    for t in tags {
+        let mut alias: Vec<String> = Vec::new();
+        if t.name != "" {
+            alias.push(t.name.clone());
+        }
+        if let Some(ref tr) = t.translated_name {
+            if tr != "" {
+                alias.push(tr.clone());
+            }
+        }
+
+        if !alias.is_empty() {
+            tags_set.insert(alias);
+        }
+    }
+}
+
+async fn set_item_invisible(
+    collection: &Collection<Document>,
+    source_id: &str,
+) -> crate::Result<()> {
+    warning!("Pixiv: Works {} is invisible!", source_id);
+    collection
+        .update_one(
+            doc! {
+                "source_id": source_id
+            },
+            doc! {
+                "$set": { "source_inaccessible": true }
+            },
+            UpdateOptions::builder().upsert(true).build(),
+        )
+        .await
+        .context(error::MongoDB)?;
+    Ok(())
+}
+
 async fn illusts<'a>(
     db: &Database,
     api: &AppAPI,
@@ -197,168 +355,53 @@ async fn illusts<'a>(
 
     let mut users_need_update_set = BTreeSet::new();
 
-    'wh: while let Some(r) = {
-        let mut tries = 0;
-        let resp;
-        loop {
-            tries += 1;
-            match pager.next().await.context(error::PixivAPI) {
-                Ok(r) => {
-                    resp = r;
-                    break;
-                }
-                Err(e) => {
-                    if tries >= 3 {
-                        return Err(e);
-                    }
-                    warn!("{}", e)
-                }
-            }
-        }
-        resp
-    } {
-        let mut ugoiras = Vec::new();
+    let mut items_sent = 0;
+    'wh: while let Some(r) = retry_pager(&mut pager, 3).await? {
         let mut tags_set = HashSet::new();
-        let mut users = BTreeMap::new();
+        let mut users_map = BTreeMap::new();
         for i in &r.illusts {
             if i.user.id != 0 {
-                let user_id = i.user.id.to_string();
-                users.insert(user_id, &i.user);
+                users_map.insert(i.user.id.to_string(), &i.user);
             }
-
-            for t in &i.tags {
-                let mut alias: Vec<String> = Vec::new();
-                if t.name != "" {
-                    alias.push(t.name.clone());
-                }
-                if let Some(ref tr) = t.translated_name {
-                    if tr != "" {
-                        alias.push(tr.clone());
-                    }
-                }
-
-                if !alias.is_empty() {
-                    tags_set.insert(alias);
-                }
-            }
+            insert_tags_to_alias(&i.tags, &mut tags_set)
         }
+        let tags_to_oid = update_tags(tags_set, &c_tag).await?;
+        let users_to_oid = update_users(users_map, &mut users_need_update_set, &c_user).await?;
 
-        let mut tags_to_oid = HashMap::new();
-
-        for alias in tags_set {
-            let regs: Vec<bson::Regex> = alias
-                .iter()
-                .map(|a| bson::Regex {
-                    pattern: format!("^{}$", regex::escape(a)),
-                    options: "i".to_string(),
-                })
-                .collect();
-            let r = c_tag
-                .find_one_and_update(
-                    doc! { "alias": { "$in": regs }, "protected": false },
-                    doc! { "$addToSet": {"alias": { "$each": &alias } } },
-                    FindOneAndUpdateOptions::builder()
-                        .upsert(true)
-                        .return_document(options::ReturnDocument::After)
-                        .projection(doc! {"_id": true})
-                        .build(),
-                )
-                .await
-                .context(error::MongoDB)?
-                .ok_or(error::MongoNotMatch.build())?;
-            for t in alias {
-                let oid = r.get_object_id("_id").context(error::MongoValueAccess)?;
-                tags_to_oid.insert(t, oid);
-            }
-        }
-
-        let mut users_to_oid = HashMap::new();
-        for (user_id, user) in users {
-            let r = c_user
-                .find_one_and_update(
-                    doc! {"source_id": &user_id},
-                    doc! {"$set": {
-                        "source_inaccessible": false,
-                        "extension.is_followed": user.is_followed,
-                    }},
-                    FindOneAndUpdateOptions::builder()
-                        .upsert(true)
-                        .return_document(options::ReturnDocument::After)
-                        .projection(doc! {
-                            "_id": true,
-                            "last_modified": true,
-                            "history.extension.avatar_url": true,
-                        })
-                        .build(),
-                )
-                .await
-                .context(error::MongoDB)?
-                .ok_or(error::MongoNotMatch.build())?;
-            let parent_id = r.get_object_id("_id").context(error::MongoValueAccess)?;
-            users_to_oid.insert(user_id.clone(), parent_id);
-
-            if let Ok(last_modified) = r.get_datetime("last_modified") {
-                if last_modified.to_chrono() <= Utc::now() - Duration::weeks(1) {
-                    users_need_update_set.insert(user_id);
-                    continue;
-                }
-            } else {
-                users_need_update_set.insert(user_id);
-                continue;
-            }
-            if let Ok(histories) = r.get_array("history") {
-                if let Some(h) = histories.last() {
-                    let s = h
-                        .as_document()
-                        .ok_or(error::MongoNotMatch.build())?
-                        .get_document("extension")
-                        .context(error::MongoValueAccess)?
-                        .get_str("avatar_url")
-                        .context(error::MongoValueAccess)?;
-                    if s != user.profile_image_urls.medium {
-                        users_need_update_set.insert(user_id);
-                    }
-                } else {
-                    users_need_update_set.insert(user_id);
-                }
-            } else {
-                users_need_update_set.insert(user_id);
-            }
-        }
-
+        let mut ugoiras = BTreeSet::new();
         for i in &r.illusts {
             let illust_id = i.id.to_string();
             if !i.visible {
                 if i.id != 0 {
-                    c_illust
-                        .update_one(
-                            doc! {
-                                "source_id": &illust_id
-                            },
-                            doc! {
-                                "$set": { "source_inaccessible": true }
-                            },
-                            UpdateOptions::builder().upsert(true).build(),
-                        )
-                        .await
-                        .context(error::MongoDB)?;
+                    set_item_invisible(&c_illust, &illust_id).await?;
                 }
                 continue;
             }
             if i.r#type == "ugoira" {
-                ugoiras.push(illust_id.clone());
+                ugoiras.insert(illust_id.clone());
             }
-            let mut tag_ids: Vec<ObjectId> = Vec::new();
-            for t in &i.tags {
-                if !t.name.is_empty() {
-                    tag_ids.push(
-                        tags_to_oid
-                            .get(&t.name)
-                            .ok_or(error::MongoNotMatch.build())?
-                            .clone(),
-                    );
-                }
-            }
+            let tag_ids = i
+                .tags
+                .iter()
+                .filter_map(|t| tags_to_oid.get(&t.name).map(|x| x.clone()))
+                .collect();
+            let illust = PIllust {
+                parent_id: Some(
+                    users_to_oid
+                        .get(&i.user.id.to_string())
+                        .ok_or(error::MongoNotMatch.build())?
+                        .to_owned(),
+                ),
+                tag_ids: Some(tag_ids),
+                source_inaccessible: false,
+                last_modified: Some(DateTime::now()),
+                extension: Some(PixivWorks {
+                    is_bookmarked: i.is_bookmarked,
+                    total_bookmarks: i.total_bookmarks,
+                    total_view: i.total_view,
+                }),
+                ..Default::default()
+            };
 
             c_illust
                 .update_one(
@@ -366,23 +409,7 @@ async fn illusts<'a>(
                         "source_id": &illust_id,
                     },
                     doc! {
-                        "$set": &to_bson(&PIllust {
-                            parent_id: Some(
-                                users_to_oid
-                                    .get(&i.user.id.to_string())
-                                    .ok_or(error::MongoNotMatch.build())?
-                                    .to_owned(),
-                            ),
-                            tag_ids: Some(tag_ids),
-                            source_inaccessible: false,
-                            last_modified: Some(DateTime::now()),
-                            extension: Some(PixivWorks {
-                                is_bookmarked: i.is_bookmarked,
-                                total_bookmarks: i.total_bookmarks,
-                                total_view: i.total_view,
-                            }),
-                            ..Default::default()
-                        }).context(error::MongoBsonConvert)?
+                        "$set": &to_bson(&illust).context(error::MongoBsonConvert)?
                     },
                     UpdateOptions::builder().upsert(true).build(),
                 )
@@ -433,8 +460,19 @@ async fn illusts<'a>(
 
         let c_image = db.collection::<Document>("pixiv_image");
 
-        let mut items_sent = 0;
         for i in r.illusts {
+            if let Some(limit) = limit {
+                if items_sent >= limit {
+                    downloader.send(tasks).await;
+                    break 'wh;
+                }
+            }
+            items_sent += 1;
+
+            if !i.visible {
+                continue;
+            }
+
             let illust_id = i.id.to_string();
 
             if i.page_count == 1 {
@@ -462,24 +500,24 @@ async fn illusts<'a>(
                     tasks.push(task);
                 }
             }
-
-            items_sent += 1;
-
-            if let Some(limit) = limit {
-                if items_sent >= limit {
-                    downloader.send(tasks).await;
-                    break 'wh;
-                }
-            }
         }
         downloader.send(tasks).await;
     }
 
+    update_user_id_set(api, &c_user, users_need_update_set).await?;
+
+    Ok(())
+}
+
+async fn update_user_id_set(
+    api: &AppAPI,
+    c_user: &Collection<Document>,
+    users_need_update_set: BTreeSet<String>,
+) -> crate::Result<()> {
     for user_id in users_need_update_set {
-        update_user_detail(api, &user_id, &c_user).await?;
+        update_user_detail(api, &user_id, c_user).await?;
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
-
     Ok(())
 }
 
@@ -581,12 +619,10 @@ pub async fn illust_uploads(
     db: &mongodb::Database,
     downloader: &crate::downloader::Downloader,
     parent_dir: PathBuf,
-    user_id: Option<i32>,
+    user_id: &str,
     limit: Option<u32>,
 ) -> Result<()> {
-    let auth_result = api.auth().await.context(error::PixivAPI)?;
-    let user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());
-    let pager = api.illust_uploads(&user_id);
+    let pager = api.illust_uploads(user_id);
 
     illusts(db, api, downloader, pager, &parent_dir, limit).await
 }
@@ -596,13 +632,147 @@ pub async fn illust_bookmarks(
     db: &mongodb::Database,
     downloader: &crate::downloader::Downloader,
     parent_dir: PathBuf,
-    user_id: Option<i32>,
+    user_id: &str,
     private: bool,
     limit: Option<u32>,
 ) -> Result<()> {
-    let auth_result = api.auth().await.context(error::PixivAPI)?;
-    let user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());
-    let pager = api.illust_bookmarks(&user_id, private);
+    let pager = api.illust_bookmarks(user_id, private);
 
     illusts(db, api, downloader, pager, &parent_dir, limit).await
+}
+
+async fn novels<'a>(
+    db: &Database,
+    api: &AppAPI,
+    mut pager: pixivcrab::Pager<'a, pixivcrab::models::novel::Response>,
+    limit: Option<u32>,
+    update_exists: bool,
+) -> crate::Result<()> {
+    let c_user = db.collection::<Document>("pixiv_user");
+    let c_tag = db.collection::<Document>("pixiv_tag");
+    let c_novel = db.collection::<Document>("pixiv_novel");
+
+    let mut users_need_update_set = BTreeSet::new();
+    let mut items_sent = 0;
+
+    'wh: while let Some(r) = retry_pager(&mut pager, 3).await? {
+        let mut tags_set = HashSet::new();
+        let mut users_map = BTreeMap::new();
+        for n in &r.novels {
+            if n.user.id != 0 {
+                users_map.insert(n.user.id.to_string(), &n.user);
+            }
+            insert_tags_to_alias(&n.tags, &mut tags_set);
+        }
+        let tags_to_oid = update_tags(tags_set, &c_tag).await?;
+        let users_to_oid = update_users(users_map, &mut users_need_update_set, &c_user).await?;
+
+        for n in r.novels {
+            if let Some(limit) = limit {
+                if items_sent >= limit {
+                    break 'wh;
+                }
+            }
+            items_sent += 1;
+            if !n.visible {
+                if n.id != 0 {
+                    set_item_invisible(&c_novel, &n.id.to_string()).await?;
+                }
+                continue;
+            }
+
+            let tag_ids = n
+                .tags
+                .iter()
+                .filter_map(|t| tags_to_oid.get(&t.name).map(|x| x.clone()))
+                .collect();
+
+            let novel_id = n.id.to_string();
+            let novel = PNovel {
+                last_modified: Some(DateTime::now()),
+                parent_id: Some(users_to_oid[&n.user.id.to_string()]),
+                tag_ids: Some(tag_ids),
+                extension: Some(PixivWorks {
+                    is_bookmarked: n.is_bookmarked,
+                    total_bookmarks: n.total_bookmarks,
+                    total_view: n.total_view,
+                }),
+                ..Default::default()
+            };
+
+            let matched_count = c_novel
+                .update_one(
+                    doc! {
+                        "source_id": &novel_id,
+                    },
+                    doc! {
+                        "$set": &to_bson(&novel).context(error::MongoBsonConvert)?
+                    },
+                    UpdateOptions::builder().upsert(true).build(),
+                )
+                .await
+                .context(error::MongoDB)?
+                .matched_count;
+            if matched_count != 0 && !update_exists {
+                continue;
+            }
+
+            let r = api.novel_text(&novel_id).await.context(error::PixivAPI)?;
+
+            let history = History {
+                extension: Some(PixivNovelHistory {
+                    caption_html: n.caption,
+                    cover_image_url: n.image_urls.large.clone().or(n.image_urls.medium),
+                    date: Some(DateTime::from_chrono(n.create_date)),
+                    image_urls: n.image_urls.large.map_or_else(|| vec![], |url| vec![url]),
+                    title: n.title,
+                    text: r.novel_text,
+                }),
+                last_modified: Some(DateTime::now()),
+            };
+
+            c_novel
+                .update_one(
+                    doc! {
+                        "source_id": &novel_id,
+                        "history.extension": {
+                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonConvert)?
+                        }
+                    },
+                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonConvert)?}},
+                    None,
+                )
+                .await
+                .context(error::MongoDB)?;
+        }
+    }
+
+    update_user_id_set(api, &c_user, users_need_update_set).await?;
+
+    Ok(())
+}
+
+pub async fn novel_bookmarks(
+    api: &pixivcrab::AppAPI,
+    db: &mongodb::Database,
+    update_exists: bool,
+    user_id: &str,
+    private: bool,
+    limit: Option<u32>,
+) -> Result<()> {
+    let pager = api.novel_bookmarks(user_id, private);
+
+    novels(db, api, pager, limit, update_exists).await
+}
+
+pub async fn novel_uploads(
+    api: &pixivcrab::AppAPI,
+    db: &mongodb::Database,
+    update_exists: bool,
+    user_id: &str,
+    limit: Option<u32>,
+) -> Result<()> {
+    let pager = api.novel_uploads(user_id);
+
+    novels(db, api, pager, limit, update_exists).await
 }

@@ -9,13 +9,12 @@ pub enum LogLevel {
     Line,
 }
 
-pub fn should_log(set_level: LogLevel, log_level: LogLevel) -> bool {
+pub(crate) fn should_log(set_level: LogLevel, log_level: LogLevel) -> bool {
     set_level <= log_level
 }
 
 pub static TARGET_LOG_LEVEL: LogLevel = LogLevel::Debug;
 
-#[macro_export]
 macro_rules! debug {
 	($($arg:tt)*) => {
 		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Debug) {
@@ -27,8 +26,8 @@ macro_rules! debug {
 		}
 	};
 }
+pub(crate) use debug;
 
-#[macro_export]
 macro_rules! info {
 	($($arg:tt)*) => {
 		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Info) {
@@ -40,9 +39,9 @@ macro_rules! info {
 		}
 	};
 }
+pub(crate) use info;
 
-#[macro_export]
-macro_rules! warn {
+macro_rules! warning {
 	($($arg:tt)*) => {
 		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Warn) {
 			use colored::Colorize;
@@ -53,8 +52,8 @@ macro_rules! warn {
 		}
 	};
 }
+pub(crate) use warning;
 
-#[macro_export]
 macro_rules! error {
 	($($arg:tt)*) => {
 		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Debug) {
@@ -66,8 +65,9 @@ macro_rules! error {
 		}
 	};
 }
+pub(crate) use error;
 
-pub fn gray_datetime() -> ColoredString {
+pub(crate) fn gray_datetime() -> ColoredString {
     chrono::Local::now()
         .format("%m-%d %T")
         .to_string()

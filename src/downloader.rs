@@ -26,7 +26,10 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{debug, error, info, warn};
+use crate::{
+    error,
+    log::{debug, error, info, warning},
+};
 
 lazy_static! {
     static ref RE_CONTENT_DISPOSITION: Regex =
@@ -44,7 +47,7 @@ struct WaitGroupInner {
 struct WaitGroup(Arc<WaitGroupInner>);
 
 impl WaitGroup {
-    // Inspired from an example in https://docs.rs/futures/0.3.17/futures/task/struct.AtomicWaker.html
+    // Inspired by an example in https://docs.rs/futures/0.3.17/futures/task/struct.AtomicWaker.html
     pub fn new() -> Self {
         Self(Arc::new(WaitGroupInner {
             num: AtomicUsize::new(0),
@@ -124,7 +127,10 @@ pub struct TaskHooks {
 }
 impl std::fmt::Debug for TaskHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "TaskHooks") // TODO: more detailed output
+        f.debug_struct("TaskHooks")
+            .field("on_success", &self.on_success.as_ref().and(Some("...")))
+            .field("on_error", &self.on_error.as_ref().and(Some("...")))
+            .finish()
     }
 }
 
@@ -219,6 +225,23 @@ impl Default for TaskStatus {
     }
 }
 
+macro_rules! exec_hook {
+    ($t:ident, $task:ident) => {
+        if let Some(ref mut hooks) = $task.hooks {
+            if let Some(hook) = hooks.$t.take() {
+                if let Err(e) = hook(&$task).await {
+                    error!(
+                        "Downloader: Task {} hook {} error: \n{:?}",
+                        $task.id(),
+                        stringify!($t),
+                        e
+                    )
+                }
+            }
+        }
+    };
+}
+
 impl Downloader {
     pub fn new(client: reqwest::Client, threads: usize) -> Downloader {
         let (task_sender, mut task_receiver) = mpsc::channel::<Task>(1);
@@ -226,9 +249,9 @@ impl Downloader {
         let mut downloader = Downloader {
             client: client.clone(),
             tasks_finished: Arc::new(RwLock::new(BTreeMap::new())),
-            tasks_pending: Arc::new(std::sync::RwLock::new(BTreeMap::new())),
+            tasks_pending: Arc::new(RwLock::new(BTreeMap::new())),
             tasks_running: Arc::new(Mutex::new(BTreeMap::new())),
-            task_sender: Arc::new(tokio::sync::Mutex::new(task_sender.clone())),
+            task_sender: Arc::new(tokio::sync::Mutex::new(task_sender)),
             semaphore: Arc::new(Semaphore::new(threads)),
             waitgroup: WaitGroup::new(),
             main_handle: None,
@@ -240,6 +263,7 @@ impl Downloader {
         let sem = Arc::clone(&downloader.semaphore);
         let client = downloader.client.clone();
         let waitgroup = downloader.waitgroup.clone();
+        let task_sender = downloader.task_sender.clone();
 
         downloader.main_handle = Some(spawn(async move {
             while let Some(mut task) = task_receiver.recv().await {
@@ -260,17 +284,7 @@ impl Downloader {
                                 Err(e) => {
                                     error!("Downloader: Task {} error: \n{:?}", task.id(), e);
                                     task.status = TaskStatus::Error(e);
-                                    if let Some(ref mut hooks) = task.hooks {
-                                        if let Some(on_error) = hooks.on_error.take() {
-                                            if let Err(e) = on_error(&task).await {
-                                                error!(
-                                                    "Downloader: Task {} hook error: \n{:?}",
-                                                    task.id(),
-                                                    e
-                                                )
-                                            }
-                                        }
-                                    }
+                                    exec_hook!(on_error, task);
                                 }
                                 Ok(status) => {
                                     match status {
@@ -295,51 +309,36 @@ impl Downloader {
                                                     .unwrap()
                                                     .to_string_lossy()
                                             );
-                                            if let Some(ref mut hooks) = task.hooks {
-                                                if let Some(on_success) = hooks.on_success.take() {
-                                                    if let Err(e) = on_success(&task).await {
-                                                        error!(
-                                                            "Downloader: Task {} hook error: \n{:?}",
-                                                            task.id(),
-                                                            e
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                            exec_hook!(on_success, task);
                                         }
                                         _ => {}
                                     }
                                     task.status = status;
                                 }
                             }
-                            // TODO: try to write a macro
 
-                            {
-                                tasks_finished.write().unwrap().insert(task.id, task);
-                            }
-
+                            tasks_finished.write().unwrap().insert(task.id, task);
                             // We need not to care about the sending result here.
-                            // #[allow(unused_must_use)]
+                            #[allow(unused_must_use)]
                             if let Some((_, task)) = {
-                                let mut lock = tasks_pending.write().unwrap();
-                                let task = lock.pop_first();
+                                let task = tasks_pending.write().unwrap().pop_first();
                                 task
                             } {
+                                let locked_sender = task_sender.lock().await;
                                 // Lock the task_sender here to ensure that the task from tasks_pending
                                 // will be execute in the next iteration.
                                 drop(permit);
                                 // Drop the permit before sending the task to make
                                 // next try_acquire_owned() success.
-                                task_sender.send(task).await.unwrap();
+                                locked_sender.send(task).await;
                             }
-                            {
-                                tasks_running_cloned.lock().unwrap().remove(&task_id);
-                            }
+
+                            tasks_running_cloned.lock().unwrap().remove(&task_id);
+
                             waitgroup.done();
                         });
-                        {
-                            tasks_running.lock().unwrap().insert(task_id, handle);
-                        }
+
+                        tasks_running.lock().unwrap().insert(task_id, handle);
                     }
                     Err(tokio::sync::TryAcquireError::Closed) => {
                         break;
@@ -364,22 +363,18 @@ impl Downloader {
     }
 
     pub async fn send(&self, tasks: Vec<Task>) {
-        // debug!("Sending tasks {:?}", tasks);
         if tasks.is_empty() {
             return;
         }
         self.waitgroup.add(tasks.len());
         for task in tasks {
-            // let task_id = task.id;
-            // debug!("send {} task_sender will send", task_id);
             self.task_sender.lock().await.send(task).await.unwrap();
-            // debug!("send {} task_sender sent", task_id);
         }
     }
 
     /// Wait for all sent tasks to finish.
-    pub async fn wait(self) {
-        self.waitgroup.clone().await
+    pub async fn wait(mut self) {
+        (&mut self.waitgroup).await;
     }
 
     async fn download(client: reqwest::Client, task: &mut Task) -> crate::Result<TaskStatus> {
@@ -486,7 +481,7 @@ impl Downloader {
                         return Err(error::Error::DownloadHTTP { source, backtrace });
                     }
 
-                    warn!(
+                    warning!(
                         "Downloader: tries {}: HTTP error in task {}: {}",
                         tries,
                         task.id(),
@@ -513,7 +508,7 @@ impl Downloader {
         let mut downloaded_len = file
             .seek(SeekFrom::End(0))
             .await
-            .context(error::DownloadIO)?; // TODO: check this
+            .context(error::DownloadIO)?;
 
         if downloaded_len > 0 {
             request.headers_mut().insert(

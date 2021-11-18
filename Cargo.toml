@@ -2,7 +2,7 @@
 name = "bowerbird"
 version = "0.1.0"
 authors = ["WOo0W <24245520+WOo0W@users.noreply.github.com>"]
-edition = "2018"
+edition = "2021"
 
 [workspace]
 

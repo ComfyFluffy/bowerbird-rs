@@ -13,6 +13,10 @@ pub enum Error {
         source: std::io::Error,
         backtrace: Backtrace,
     },
+    ProxyParse {
+        source: reqwest::Error,
+        backtrace: Backtrace,
+    },
     #[snafu(display("pixiv api error: {}", source))]
     PixivAPI {
         source: pixivcrab::error::Error,

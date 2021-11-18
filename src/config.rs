@@ -5,7 +5,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{error, info, log::LogLevel, Result};
+use crate::{
+    error,
+    log::{info, LogLevel},
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
@@ -18,6 +21,7 @@ pub struct Config {
     pub root_storage_dir: String,
     pub mongodb: MongoDBConfig,
     pub pixiv: PixivConfig,
+    pub proxy_all: String,
 }
 
 impl Default for Config {
@@ -33,6 +37,7 @@ impl Default for Config {
                 .to_string(),
             mongodb: MongoDBConfig::default(),
             pixiv: PixivConfig::default(),
+            proxy_all: "".to_string(),
         }
     }
 }
@@ -57,24 +62,28 @@ impl Default for MongoDBConfig {
 #[serde(default)]
 pub struct PixivConfig {
     pub storage_dir: String,
-    pub proxy: String,
+    pub proxy_api: String,
+    pub proxy_download: String,
     pub refresh_token: String,
     pub language: String,
+    pub ignore_certificate: bool,
 }
 
 impl Default for PixivConfig {
     fn default() -> Self {
         Self {
-            proxy: "".to_string(),
+            proxy_api: "".to_string(),
+            proxy_download: "".to_string(),
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
             language: "en".to_string(),
+            ignore_certificate: false,
         }
     }
 }
 
 impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Config> {
         if !path.as_ref().exists() {
             info!("Creating config file: {}", path.as_ref().to_string_lossy());
             let mut defaults = Config::default();
@@ -91,7 +100,7 @@ impl Config {
         }
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> crate::Result<()> {
         let path = self
             .config_path
             .as_ref()
@@ -124,5 +133,18 @@ impl Config {
             "error" => LogLevel::Error,
             _ => return None,
         })
+    }
+
+    pub fn pxoxy(&self, url: &str) -> crate::Result<Option<reqwest::Proxy>> {
+        use reqwest::Proxy;
+        if !url.is_empty() {
+            Ok(Some(Proxy::all(url).context(error::ProxyParse)?))
+        } else if !self.proxy_all.is_empty() {
+            Ok(Some(
+                Proxy::all(&self.proxy_all).context(error::ProxyParse)?,
+            ))
+        } else {
+            Ok(None)
+        }
     }
 }
