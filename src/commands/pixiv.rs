@@ -197,11 +197,16 @@ where
                 return Ok(r);
             }
             Err(e) => {
-                if tries >= max_tries {
-                    return Err(e);
+                if let error::Error::PixivAPI { source, .. } = &e {
+                    if let pixivcrab::error::Error::HTTP { .. } = source {
+                        if tries <= max_tries {
+                            warning!("{}", e);
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            continue;
+                        }
+                    }
                 }
-                warning!("{}", e);
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                return Err(e);
             }
         }
     }
@@ -352,6 +357,7 @@ async fn illusts<'a>(
     let c_illust = db.collection::<Document>("pixiv_illust");
     let c_user = db.collection::<Document>("pixiv_user");
     let c_tag = db.collection::<Document>("pixiv_tag");
+    let c_image = db.collection::<Document>("pixiv_image");
 
     let mut users_need_update_set = BTreeSet::new();
 
@@ -368,7 +374,8 @@ async fn illusts<'a>(
         let tags_to_oid = update_tags(tags_set, &c_tag).await?;
         let users_to_oid = update_users(users_map, &mut users_need_update_set, &c_user).await?;
 
-        let mut ugoiras = BTreeSet::new();
+        let mut tasks = Vec::new();
+
         for i in &r.illusts {
             let illust_id = i.id.to_string();
             if !i.visible {
@@ -376,9 +383,6 @@ async fn illusts<'a>(
                     set_item_invisible(&c_illust, &illust_id).await?;
                 }
                 continue;
-            }
-            if i.r#type == "ugoira" {
-                ugoiras.insert(illust_id.clone());
             }
             let tag_ids = i
                 .tags
@@ -416,7 +420,7 @@ async fn illusts<'a>(
                 .await
                 .context(error::MongoDB)?;
 
-            let history = History {
+            let mut history = History {
                 last_modified: Some(DateTime::now()),
                 extension: Some(PixivIllustHistory {
                     caption_html: i.caption.clone(),
@@ -441,6 +445,44 @@ async fn illusts<'a>(
                     ugoira_delay: None, // TODO: fetch ugoira info after all items are sent.
                 }),
             };
+            if i.r#type == "ugoira" {
+                let ugoira = api
+                    .ugoira_metadata(&illust_id)
+                    .await
+                    .context(error::PixivAPI)?;
+                history.extension.as_mut().unwrap().ugoira_delay = Some(
+                    ugoira
+                        .ugoira_metadata
+                        .frames
+                        .iter()
+                        .map(|frame| frame.delay)
+                        .collect(),
+                );
+
+                let url = ugoira
+                    .ugoira_metadata
+                    .zip_urls
+                    .medium
+                    .replace("600x600", "1920x1080");
+                match task_from_illust(
+                    &api,
+                    c_image.clone(),
+                    // get higher resolution images
+                    Some(url.clone()),
+                    parent_dir,
+                    &i.user.id.to_string(),
+                    &illust_id,
+                    true,
+                ) {
+                    Ok(task) => {
+                        tasks.push(task);
+                    }
+                    Err(err) => {
+                        warning!("Fail to build task from {}: {}", url, err)
+                    }
+                }
+            }
+
             c_illust
                 .update_one(
                     doc! {
@@ -455,10 +497,6 @@ async fn illusts<'a>(
                 .await
                 .context(error::MongoDB)?;
         }
-
-        let mut tasks = Vec::new();
-
-        let c_image = db.collection::<Document>("pixiv_image");
 
         for i in r.illusts {
             if let Some(limit) = limit {
@@ -483,7 +521,7 @@ async fn illusts<'a>(
                     parent_dir,
                     &i.user.id.to_string(),
                     &illust_id,
-                    false,
+                    i.r#type == "ugoira",
                 ));
                 tasks.push(task);
             } else {
@@ -514,9 +552,13 @@ async fn update_user_id_set(
     c_user: &Collection<Document>,
     users_need_update_set: BTreeSet<String>,
 ) -> crate::Result<()> {
+    let need_sleep = users_need_update_set.len() > 500;
+    // Sleep for 2s to avoid 403 error
     for user_id in users_need_update_set {
         update_user_detail(api, &user_id, c_user).await?;
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        if need_sleep {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
     }
     Ok(())
 }
@@ -580,7 +622,7 @@ pub async fn update_user_detail(
             workspace: {
                 let mut workspace = BTreeMap::new();
                 for (k, v) in resp.workspace {
-                    if k.as_str() == "workspace_image_url" {
+                    if k == "workspace_image_url" {
                         continue;
                     }
                     if let Some(v) = v {
@@ -717,6 +759,7 @@ async fn novels<'a>(
                 continue;
             }
 
+            info!("Pixiv: Getting novel text of {}", &novel_id);
             let r = api.novel_text(&novel_id).await.context(error::PixivAPI)?;
 
             let history = History {

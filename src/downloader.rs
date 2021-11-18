@@ -356,12 +356,6 @@ impl Downloader {
         downloader
     }
 
-    pub async fn send_one(&self, task: Task) {
-        // debug!("Sending task {:?}", task);
-        self.waitgroup.add(1);
-        self.task_sender.lock().await.send(task).await.unwrap();
-    }
-
     pub async fn send(&self, tasks: Vec<Task>) {
         if tasks.is_empty() {
             return;

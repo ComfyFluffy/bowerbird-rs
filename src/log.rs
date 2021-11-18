@@ -1,23 +1,15 @@
+use crate::config::LogLevel;
 use colored::{ColoredString, Colorize};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum LogLevel {
-    Debug = 1,
-    Info,
-    Warn,
-    Error,
-    Line,
-}
+pub static mut TARGET_LOG_LEVEL: LogLevel = LogLevel::Debug;
 
-pub(crate) fn should_log(set_level: LogLevel, log_level: LogLevel) -> bool {
-    set_level <= log_level
+pub fn should_log(log_level: LogLevel) -> bool {
+    log_level >= unsafe { TARGET_LOG_LEVEL }
 }
-
-pub static TARGET_LOG_LEVEL: LogLevel = LogLevel::Debug;
 
 macro_rules! debug {
 	($($arg:tt)*) => {
-		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Debug) {
+		if $crate::log::should_log($crate::config::LogLevel::Debug) {
 			use colored::Colorize;
 			println!("\r{} [{}] {}",
 			$crate::log::gray_datetime(),
@@ -26,11 +18,10 @@ macro_rules! debug {
 		}
 	};
 }
-pub(crate) use debug;
 
 macro_rules! info {
 	($($arg:tt)*) => {
-		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Info) {
+		if $crate::log::should_log($crate::config::LogLevel::Info) {
 			use colored::Colorize;
 			println!("\r{} [{}] {}",
 			$crate::log::gray_datetime(),
@@ -39,24 +30,22 @@ macro_rules! info {
 		}
 	};
 }
-pub(crate) use info;
 
 macro_rules! warning {
 	($($arg:tt)*) => {
-		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Warn) {
+		if $crate::log::should_log($crate::config::LogLevel::Warn) {
 			use colored::Colorize;
 			println!("\r{} [{}] {}",
 			$crate::log::gray_datetime(),
-			"WARN".bright_yellow(),
+			"WARNING".bright_yellow(),
 			format!($($arg)*).bright_yellow());
 		}
 	};
 }
-pub(crate) use warning;
 
 macro_rules! error {
 	($($arg:tt)*) => {
-		if $crate::log::should_log($crate::log::TARGET_LOG_LEVEL, $crate::log::LogLevel::Debug) {
+		if $crate::log::should_log($crate::config::LogLevel::Debug) {
 			use colored::Colorize;
 			println!("\r{} [{}] {}",
 			$crate::log::gray_datetime(),
@@ -65,9 +54,9 @@ macro_rules! error {
 		}
 	};
 }
-pub(crate) use error;
+pub(crate) use {debug, error, info, warning};
 
-pub(crate) fn gray_datetime() -> ColoredString {
+pub fn gray_datetime() -> ColoredString {
     chrono::Local::now()
         .format("%m-%d %T")
         .to_string()

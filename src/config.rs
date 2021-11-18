@@ -5,10 +5,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    error,
-    log::{info, LogLevel},
-};
+use crate::{error, log::info};
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    Debug = 1,
+    Info,
+    Warn,
+    Error,
+    // Line,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
@@ -145,6 +150,12 @@ impl Config {
             ))
         } else {
             Ok(None)
+        }
+    }
+
+    pub(crate) fn set_log_level(&self) {
+        if let Some(l) = self.log_level() {
+            unsafe { crate::log::TARGET_LOG_LEVEL = l }
         }
     }
 }

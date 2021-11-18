@@ -33,22 +33,31 @@ struct Pixiv {
 #[derive(Parser)]
 enum SubcommandPixiv {
     Illust(PixivIllust),
+    Novel(PixivNovel),
 }
 
 #[derive(Parser)]
 struct PixivIllust {
     #[clap(subcommand)]
-    subcommand: SubcommandPixivIllust,
+    subcommand: SubcommandPixivAction,
 }
 
 #[derive(Parser)]
-enum SubcommandPixivIllust {
-    Bookmarks(PixivIllustBookmarks),
+struct PixivNovel {
+    #[clap(long)]
+    update_exists: bool,
+    #[clap(subcommand)]
+    subcommand: SubcommandPixivAction,
+}
+
+#[derive(Parser)]
+enum SubcommandPixivAction {
+    Bookmarks(PixivBookmarks),
     Uploads,
 }
 
 #[derive(Parser)]
-struct PixivIllustBookmarks {
+struct PixivBookmarks {
     #[clap(long)]
     private: bool,
 }
@@ -70,6 +79,7 @@ async fn run_internal() -> crate::Result<()> {
 
     let pre_fn = async {
         let config = config_builder()?;
+        config.set_log_level();
         let db_client = mongodb::Client::with_options(
             mongodb::options::ClientOptions::parse(&config.mongodb.uri)
                 .await
@@ -93,12 +103,13 @@ async fn run_internal() -> crate::Result<()> {
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
                     api_client = api_client.proxy(proxy);
                 }
+                if let Ok(_) = std::env::var("BOWERBIRD_ACCEPT_INVALID_CERTS") {
+                    api_client = api_client.danger_accept_invalid_certs(true);
+                }
                 let api = pixivcrab::AppAPI::new(
                     AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
                     &config.pixiv.language,
-                    api_client
-                        // .danger_accept_invalid_certs(true)
-                        // .proxy(reqwest::Proxy::https("http://192.168.233.128:8888").unwrap()),
+                    api_client.danger_accept_invalid_certs(true),
                 )
                 .context(error::PixivAPI)?;
                 let auth_result = api.auth().await.context(error::PixivAPI)?;
@@ -122,7 +133,7 @@ async fn run_internal() -> crate::Result<()> {
                         Ok((config, db, api, selected_user_id, downloader))
                     };
                     match &c.subcommand {
-                        SubcommandPixivIllust::Bookmarks(c) => {
+                        SubcommandPixivAction::Bookmarks(c) => {
                             let (config, db, api, selected_user_id, downloader) = pre_fn.await?;
                             commands::pixiv::illust_bookmarks(
                                 &api,
@@ -136,7 +147,7 @@ async fn run_internal() -> crate::Result<()> {
                             .await?;
                             downloader.wait().await;
                         }
-                        SubcommandPixivIllust::Uploads => {
+                        SubcommandPixivAction::Uploads => {
                             let (config, db, api, selected_user_id, downloader) = pre_fn.await?;
                             commands::pixiv::illust_uploads(
                                 &api,
@@ -150,6 +161,34 @@ async fn run_internal() -> crate::Result<()> {
                             downloader.wait().await;
                         }
                     }
+                }
+                SubcommandPixiv::Novel(c) => {
+                    let update_exists = c.update_exists;
+                    match &c.subcommand {
+                        SubcommandPixivAction::Bookmarks(c) => {
+                            let (_, db, api, selected_user_id) = pre_fn.await?;
+                            commands::pixiv::novel_bookmarks(
+                                &api,
+                                &db,
+                                update_exists,
+                                &selected_user_id,
+                                c.private,
+                                limit,
+                            )
+                            .await?;
+                        }
+                        SubcommandPixivAction::Uploads => {
+                            let (_, db, api, selected_user_id) = pre_fn.await?;
+                            commands::pixiv::novel_uploads(
+                                &api,
+                                &db,
+                                update_exists,
+                                &selected_user_id,
+                                limit,
+                            )
+                            .await?;
+                        }
+                    };
                 }
             }
         }
