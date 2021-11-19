@@ -1,4 +1,5 @@
 use bytes::{BufMut, BytesMut};
+
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -17,7 +18,7 @@ use futures::{future::BoxFuture, task::AtomicWaker, Future};
 use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::{Method, Url};
-use snafu::ResultExt;
+use snafu::{ErrorCompat, ResultExt};
 use tokio::{
     fs::{self, File},
     io::{AsyncSeekExt, AsyncWriteExt},
@@ -119,17 +120,28 @@ impl std::fmt::Debug for RequestBuilder {
     }
 }
 
-type ClosureFuture = Box<dyn FnOnce(&Task) -> BoxFuture<'static, crate::Result<()>> + Send + Sync>;
+pub type ClosureFuture = Box<
+    dyn FnOnce(&Task) -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>>
+        + Send
+        + Sync,
+>;
 #[derive(Default)]
 pub struct TaskHooks {
     pub on_success: Option<ClosureFuture>,
     pub on_error: Option<ClosureFuture>,
 }
+fn print_some<T>(t: &Option<T>) -> &str {
+    if t.is_some() {
+        "Some(..)"
+    } else {
+        "None"
+    }
+}
 impl std::fmt::Debug for TaskHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("TaskHooks")
-            .field("on_success", &self.on_success.as_ref().and(Some("...")))
-            .field("on_error", &self.on_error.as_ref().and(Some("...")))
+            .field("on_success", &print_some(&self.on_success))
+            .field("on_error", &print_some(&self.on_error))
             .finish()
     }
 }
@@ -231,7 +243,7 @@ macro_rules! exec_hook {
             if let Some(hook) = hooks.$t.take() {
                 if let Err(e) = hook(&$task).await {
                     error!(
-                        "Downloader: Task {} hook {} error: \n{:?}",
+                        "Downloader: Task {} hook {} error: {}",
                         $task.id(),
                         stringify!($t),
                         e
@@ -282,7 +294,12 @@ impl Downloader {
                             task.status = TaskStatus::Running;
                             match Self::download(client, &mut task).await {
                                 Err(e) => {
-                                    error!("Downloader: Task {} error: \n{:?}", task.id(), e);
+                                    error!(
+                                        "Downloader: Task {} error: {}\n{}",
+                                        task.id(),
+                                        e,
+                                        e.backtrace().unwrap()
+                                    );
                                     task.status = TaskStatus::Error(e);
                                     exec_hook!(on_error, task);
                                 }
@@ -344,10 +361,7 @@ impl Downloader {
                         break;
                     }
                     Err(tokio::sync::TryAcquireError::NoPermits) => {
-                        // let task_id = task.id;
-                        // debug!("m {} task will send", task_id)/;
                         tasks_pending.write().unwrap().insert(task.id, task);
-                        // debug!("m {} task sent", task_id);
                     }
                 }
             }
@@ -374,7 +388,10 @@ impl Downloader {
     async fn download(client: reqwest::Client, task: &mut Task) -> crate::Result<TaskStatus> {
         if let Some(p) = &task.options.path {
             if p.is_relative() {
-                return error::DownloadPathNotAbsolute.fail();
+                return error::DownloadPathNotAbsolute {
+                    message: format!("{:?}", task),
+                }
+                .fail();
             }
             if p.exists() && task.options.skip_exists {
                 return Ok(TaskStatus::Skipped);
@@ -424,7 +441,12 @@ impl Downloader {
                     if path_from_header.is_none() {
                         let path = dir.join(match Path::new(resp.url().path()).file_name() {
                             Some(p) => sanitize_filename::sanitize(p.to_string_lossy()),
-                            None => return error::DownloadPathNotSet.fail(),
+                            None => {
+                                return error::DownloadPathNotSet {
+                                    message: format!("{:?}", task),
+                                }
+                                .fail();
+                            }
                         });
                         path
                     } else {
@@ -434,7 +456,10 @@ impl Downloader {
                     }
                 }
                 None => {
-                    return error::DownloadPathNotSet.fail();
+                    return error::DownloadPathNotSet {
+                        message: format!("{:?}", task),
+                    }
+                    .fail();
                 }
             },
         };
@@ -522,7 +547,7 @@ impl Downloader {
             }
             return error::DownloadHTTPStatus {
                 status: resp.status(),
-                response,
+                response: String::from_utf8_lossy(&response).clone(),
             }
             .fail();
         }

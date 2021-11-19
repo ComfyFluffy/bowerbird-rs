@@ -6,14 +6,16 @@ use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
+    process::{Command, Stdio},
 };
+use tokio::task::spawn_blocking;
 
 use lazy_static::lazy_static;
 use reqwest::{Method, Url};
 use snafu::ResultExt;
 
 use crate::{
-    downloader::{Task, TaskHooks, TaskOptions},
+    downloader::{ClosureFuture, Task, TaskHooks, TaskOptions},
     error,
     log::{info, warning},
     models::{
@@ -21,7 +23,6 @@ use crate::{
         pixiv::{PixivIllustHistory, PixivNovelHistory, PixivUser, PixivUserHistory, PixivWorks},
         History, ImageMedia, Item, LocalMedia,
     },
-    Result,
 };
 
 use mongodb::{
@@ -81,6 +82,8 @@ fn task_from_illust(
     user_id: &str,
     illust_id: &str,
     is_multi_page: bool,
+    ffmpeg_path: &Option<PathBuf>,
+    delay: Option<Vec<i32>>,
 ) -> crate::Result<Task> {
     let url = match raw_url {
         Some(raw_url) => match raw_url.parse::<Url>() {
@@ -89,12 +92,20 @@ fn task_from_illust(
                 return Err(e).context(error::PixivParseURL);
             }
         },
-        None => return error::PixivParse.fail(),
+        None => {
+            return error::PixivParse {
+                message: "empty url".to_string(),
+            }
+            .fail()
+        }
     };
 
-    let captures = RE_ILLUST_URL
-        .captures(url.path())
-        .ok_or(error::PixivParse.build())?;
+    let captures = RE_ILLUST_URL.captures(url.path()).ok_or(
+        error::PixivParse {
+            message: format!("cannot match url with RE_ILLUST_URL: {}", url),
+        }
+        .build(),
+    )?;
     let date = captures.get(1).unwrap().as_str().replace("/", "");
 
     let request_builder = {
@@ -127,24 +138,101 @@ fn task_from_illust(
         )
     };
     let path = parent_dir.join(PathBuf::from_slash(&path_slash));
-    let on_success_hook = {
+    let on_success_hook: ClosureFuture = if let Some(ffmpeg_path) = ffmpeg_path {
+        let ffmpeg_path = ffmpeg_path.clone();
+        Box::new(move |t: &Task| {
+            let path = t.options.path.clone().unwrap();
+
+            async move {
+                spawn_blocking(
+                    move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                        let mut file = std::fs::File::open(&path)?;
+                        let mut zip_file = zip::ZipArchive::new(&mut file)?;
+                        let delay = delay.unwrap();
+                        let mut path_mp4 = path.clone();
+                        path_mp4.set_extension("mp4");
+
+                        let mut ffmpeg = Command::new(&ffmpeg_path)
+                            .args([
+                                "-y",
+                                "-hide_banner",
+                                "-loglevel",
+                                "error",
+                                "-f",
+                                "image2pipe",
+                                "-framerate",
+                                "60",
+                                "-i",
+                                "-",
+                                "-c:v",
+                                "libx264",
+                                "-preset",
+                                "slow",
+                                "-crf",
+                                "22",
+                                "-pix_fmt",
+                                "yuv420p",
+                            ])
+                            .arg(path_mp4.as_os_str())
+                            .stdin(Stdio::piped())
+                            .spawn()?;
+                        let mut stdin = ffmpeg.stdin.take().unwrap();
+
+                        for i in 0..zip_file.len() {
+                            let delay_frame: f64 = delay
+                                .get(i)
+                                .ok_or(error::UgoiraToVideo.build())?
+                                .clone()
+                                .into();
+                            for _ in 0..(delay_frame / (1000.0 / 60.0)).round() as i64 {
+                                let mut file = zip_file.by_index(i)?;
+                                std::io::copy(&mut file, &mut stdin)?;
+                            }
+                        }
+                        drop(stdin);
+                        let status = ffmpeg.wait().context(error::DownloadIO)?;
+                        if !status.success() {
+                            warning!("FFmpeg exited with status {}", status)
+                        }
+                        Ok(())
+                    },
+                )
+                .await
+                .unwrap()?;
+                // zip::read::ZipArchive::new(reader);
+                Ok(())
+            }
+            .boxed()
+        })
+    } else {
         let url_clone = url.clone();
-        |t: &Task| {
+        Box::new(move |t: &Task| {
             let path = t.options.path.clone().unwrap();
             let size = t.file_size.unwrap() as i64;
 
             async move {
                 let buffer = tokio::fs::read(&path).await.context(error::DownloadIO)?;
-                let img = image::load_from_memory(&buffer).context(error::Image)?;
 
-                let (w, h) = img.dimensions();
-                let p = img.thumbnail(512, 512).to_rgba8();
-                let rgb_v =
-                    color_thief::get_palette(p.as_raw(), color_thief::ColorFormat::Rgba, 5, 5)
+                let (w, h, rgb_v) =
+                    spawn_blocking(move || -> crate::Result<(i32, i32, Vec<models::RGB>)> {
+                        let img = image::load_from_memory(&buffer).context(error::Image)?;
+                        let (w, h) = img.dimensions();
+                        let p = img.thumbnail(512, 512).to_rgba8();
+                        let rgb_v = color_thief::get_palette(
+                            p.as_raw(),
+                            color_thief::ColorFormat::Rgba,
+                            5,
+                            5,
+                        )
                         .context(error::ImageColorThief)?
                         .into_iter()
                         .map(|c| models::RGB(c.r.into(), c.g.into(), c.b.into()))
                         .collect();
+                        Ok((w as i32, h as i32, rgb_v))
+                    })
+                    .await
+                    .unwrap()?;
+
                 c_image
                     .update_one(
                         doc! {"_id": url_clone.as_str()},
@@ -168,7 +256,7 @@ fn task_from_illust(
                 Ok(())
             }
             .boxed()
-        }
+        })
     };
 
     Ok(Task::new(
@@ -180,7 +268,7 @@ fn task_from_illust(
         },
         Some(TaskHooks {
             on_error: None,
-            on_success: Some(Box::new(on_success_hook)),
+            on_success: Some(on_success_hook),
         }),
     ))
 }
@@ -353,7 +441,8 @@ async fn illusts<'a>(
     mut pager: pixivcrab::Pager<'a, pixivcrab::models::illust::Response>,
     parent_dir: &PathBuf,
     limit: Option<u32>,
-) -> Result<()> {
+    ffmpeg_path: &Option<PathBuf>,
+) -> crate::Result<()> {
     let c_illust = db.collection::<Document>("pixiv_illust");
     let c_user = db.collection::<Document>("pixiv_user");
     let c_tag = db.collection::<Document>("pixiv_tag");
@@ -450,14 +539,13 @@ async fn illusts<'a>(
                     .ugoira_metadata(&illust_id)
                     .await
                     .context(error::PixivAPI)?;
-                history.extension.as_mut().unwrap().ugoira_delay = Some(
-                    ugoira
-                        .ugoira_metadata
-                        .frames
-                        .iter()
-                        .map(|frame| frame.delay)
-                        .collect(),
-                );
+                let delay: Vec<i32> = ugoira
+                    .ugoira_metadata
+                    .frames
+                    .iter()
+                    .map(|frame| frame.delay)
+                    .collect();
+                history.extension.as_mut().unwrap().ugoira_delay = Some(delay.clone());
 
                 let url = ugoira
                     .ugoira_metadata
@@ -473,6 +561,8 @@ async fn illusts<'a>(
                     &i.user.id.to_string(),
                     &illust_id,
                     true,
+                    ffmpeg_path,
+                    Some(delay),
                 ) {
                     Ok(task) => {
                         tasks.push(task);
@@ -514,6 +604,7 @@ async fn illusts<'a>(
             let illust_id = i.id.to_string();
 
             if i.page_count == 1 {
+                let is_ugoira = i.r#type == "ugoira";
                 let task = try_skip!(task_from_illust(
                     &api,
                     c_image.clone(),
@@ -521,7 +612,9 @@ async fn illusts<'a>(
                     parent_dir,
                     &i.user.id.to_string(),
                     &illust_id,
-                    i.r#type == "ugoira",
+                    is_ugoira,
+                    &None,
+                    None
                 ));
                 tasks.push(task);
             } else {
@@ -534,6 +627,8 @@ async fn illusts<'a>(
                         &i.user.id.to_string(),
                         &illust_id,
                         true,
+                        &None,
+                        None
                     ));
                     tasks.push(task);
                 }
@@ -663,10 +758,11 @@ pub async fn illust_uploads(
     parent_dir: PathBuf,
     user_id: &str,
     limit: Option<u32>,
-) -> Result<()> {
+    ffmpeg_path: &Option<PathBuf>,
+) -> crate::Result<()> {
     let pager = api.illust_uploads(user_id);
 
-    illusts(db, api, downloader, pager, &parent_dir, limit).await
+    illusts(db, api, downloader, pager, &parent_dir, limit, ffmpeg_path).await
 }
 
 pub async fn illust_bookmarks(
@@ -677,10 +773,11 @@ pub async fn illust_bookmarks(
     user_id: &str,
     private: bool,
     limit: Option<u32>,
-) -> Result<()> {
+    ffmpeg_path: &Option<PathBuf>,
+) -> crate::Result<()> {
     let pager = api.illust_bookmarks(user_id, private);
 
-    illusts(db, api, downloader, pager, &parent_dir, limit).await
+    illusts(db, api, downloader, pager, &parent_dir, limit, ffmpeg_path).await
 }
 
 async fn novels<'a>(
@@ -802,7 +899,7 @@ pub async fn novel_bookmarks(
     user_id: &str,
     private: bool,
     limit: Option<u32>,
-) -> Result<()> {
+) -> crate::Result<()> {
     let pager = api.novel_bookmarks(user_id, private);
 
     novels(db, api, pager, limit, update_exists).await
@@ -814,7 +911,7 @@ pub async fn novel_uploads(
     update_exists: bool,
     user_id: &str,
     limit: Option<u32>,
-) -> Result<()> {
+) -> crate::Result<()> {
     let pager = api.novel_uploads(user_id);
 
     novels(db, api, pager, limit, update_exists).await

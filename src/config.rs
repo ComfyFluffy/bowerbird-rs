@@ -27,6 +27,7 @@ pub struct Config {
     pub mongodb: MongoDBConfig,
     pub pixiv: PixivConfig,
     pub proxy_all: String,
+    pub ffmpeg_path: String,
 }
 
 impl Default for Config {
@@ -43,6 +44,7 @@ impl Default for Config {
             mongodb: MongoDBConfig::default(),
             pixiv: PixivConfig::default(),
             proxy_all: "".to_string(),
+            ffmpeg_path: "".to_string(),
         }
     }
 }
@@ -109,7 +111,7 @@ impl Config {
         let path = self
             .config_path
             .as_ref()
-            .ok_or(error::DownloadPathNotSet.build())?;
+            .ok_or(error::ConfigPathNotSet.build())?;
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p).context(error::ConfigIO)?;
         }

@@ -1,9 +1,15 @@
-use std::{path::PathBuf, process};
+use std::{
+    path::PathBuf,
+    process::{self, Command},
+};
 
 use clap::Parser;
-use snafu::ResultExt;
+use snafu::{ErrorCompat, ResultExt};
 
-use crate::{commands, config, error, log::error};
+use crate::{
+    commands, config, error,
+    log::{error, warning},
+};
 
 #[derive(Parser)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
@@ -86,7 +92,30 @@ async fn run_internal() -> crate::Result<()> {
                 .context(error::MongoDB)?,
         )
         .context(error::MongoDB)?;
-        Ok((db_client.database(&config.mongodb.database_name), config))
+
+        let ffmpeg_path = if config.ffmpeg_path.is_empty() {
+            PathBuf::from("ffmpeg")
+        } else {
+            PathBuf::from(&config.ffmpeg_path)
+        };
+        let mut ffmpeg = Command::new(&ffmpeg_path);
+        ffmpeg.args(["-hide_banner", "-loglevel", "error"]);
+        let ffmpeg_exists = ffmpeg.spawn().is_ok();
+        if !ffmpeg_exists {
+            warning!(
+                "FFmpeg not found, some functions will not work: {}",
+                ffmpeg_path.to_string_lossy()
+            );
+        }
+        let ffmpeg_path = if ffmpeg_exists {
+            Some(ffmpeg_path)
+        } else {
+            None
+        };
+
+        let db = db_client.database(&config.mongodb.database_name);
+
+        Ok((config, ffmpeg_path, db))
     };
 
     match &opts.subcommand {
@@ -98,7 +127,7 @@ async fn run_internal() -> crate::Result<()> {
             let user_id = c.user_id;
             let limit = c.limit;
             let pre_fn = async {
-                let (db, mut config) = pre_fn.await?;
+                let (mut config, ffmpeg_path, db) = pre_fn.await?;
                 let mut api_client = reqwest::ClientBuilder::new();
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
                     api_client = api_client.proxy(proxy);
@@ -116,25 +145,26 @@ async fn run_internal() -> crate::Result<()> {
                 config.pixiv.refresh_token = auth_result.refresh_token;
                 config.save()?;
                 let selected_user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());
-                Ok((config, db, api, selected_user_id))
+                Ok((config, ffmpeg_path, db, api, selected_user_id))
             };
             match &c.subcommand {
                 SubcommandPixiv::Illust(c) => {
                     let pre_fn = async {
-                        let (config, db, api, selected_user_id) = pre_fn.await?;
+                        let (config, ffmpeg_path, db, api, selected_user_id) = pre_fn.await?;
                         let mut downloader_client = reqwest::ClientBuilder::new();
-                        if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
+                        if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_download)? {
                             downloader_client = downloader_client.proxy(proxy);
                         }
                         let downloader = crate::downloader::Downloader::new(
                             downloader_client.build().context(error::DownloadHTTP)?,
                             5,
                         );
-                        Ok((config, db, api, selected_user_id, downloader))
+                        Ok((config, ffmpeg_path, db, api, selected_user_id, downloader))
                     };
                     match &c.subcommand {
                         SubcommandPixivAction::Bookmarks(c) => {
-                            let (config, db, api, selected_user_id, downloader) = pre_fn.await?;
+                            let (config, ffmpeg_path, db, api, selected_user_id, downloader) =
+                                pre_fn.await?;
                             commands::pixiv::illust_bookmarks(
                                 &api,
                                 &db,
@@ -143,12 +173,14 @@ async fn run_internal() -> crate::Result<()> {
                                 &selected_user_id,
                                 c.private,
                                 limit,
+                                &ffmpeg_path,
                             )
                             .await?;
                             downloader.wait().await;
                         }
                         SubcommandPixivAction::Uploads => {
-                            let (config, db, api, selected_user_id, downloader) = pre_fn.await?;
+                            let (config, ffmpeg_path, db, api, selected_user_id, downloader) =
+                                pre_fn.await?;
                             commands::pixiv::illust_uploads(
                                 &api,
                                 &db,
@@ -156,6 +188,7 @@ async fn run_internal() -> crate::Result<()> {
                                 config.sub_dir(&config.pixiv.storage_dir),
                                 &selected_user_id,
                                 limit,
+                                &ffmpeg_path,
                             )
                             .await?;
                             downloader.wait().await;
@@ -166,7 +199,7 @@ async fn run_internal() -> crate::Result<()> {
                     let update_exists = c.update_exists;
                     match &c.subcommand {
                         SubcommandPixivAction::Bookmarks(c) => {
-                            let (_, db, api, selected_user_id) = pre_fn.await?;
+                            let (_, _, db, api, selected_user_id) = pre_fn.await?;
                             commands::pixiv::novel_bookmarks(
                                 &api,
                                 &db,
@@ -178,7 +211,7 @@ async fn run_internal() -> crate::Result<()> {
                             .await?;
                         }
                         SubcommandPixivAction::Uploads => {
-                            let (_, db, api, selected_user_id) = pre_fn.await?;
+                            let (_, _, db, api, selected_user_id) = pre_fn.await?;
                             commands::pixiv::novel_uploads(
                                 &api,
                                 &db,
@@ -201,7 +234,7 @@ async fn run_internal() -> crate::Result<()> {
 pub async fn run() {
     match run_internal().await {
         Err(e) => {
-            error!("\n{:?}", e);
+            error!("{}\n{}", e, e.backtrace().unwrap());
             process::exit(1);
         }
         _ => {}
