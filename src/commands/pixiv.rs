@@ -171,22 +171,27 @@ fn task_from_illust(
                             "22",
                             "-pix_fmt",
                             "yuv420p",
+                            "-vf",
+                            "pad=ceil(iw/2)*2:ceil(ih/2)*2",
                         ])
                         .arg(path_mp4.as_os_str())
                         .stdin(Stdio::piped())
                         .spawn()?;
                     let mut stdin = ffmpeg.stdin.take().unwrap();
 
+                    let mut t: f32 = 0.0;
+                    let mut frame = 0;
                     for i in 0..zip_file.len() {
-                        let delay_frame: f64 = delay
+                        t += delay
                             .get(i)
                             .ok_or(format!("Cannot get ugoira frame {} from {:?}", i, delay))?
-                            .clone()
-                            .into();
-                        for _ in 0..(delay_frame / (1000.0 / 60.0)).round() as i64 {
+                            .clone() as f32;
+                        let next_frame = (t / (1000.0 / 60.0)).round() as i32;
+                        for _ in frame..next_frame {
                             let mut file = zip_file.by_index(i)?;
                             std::io::copy(&mut file, &mut stdin)?;
                         }
+                        frame = next_frame;
                     }
                     drop(stdin);
                     let status = ffmpeg.wait()?;
@@ -601,7 +606,6 @@ async fn illusts<'a>(
             let illust_id = i.id.to_string();
 
             if i.page_count == 1 {
-                let is_ugoira = i.r#type == "ugoira";
                 let task = try_skip!(task_from_illust(
                     &api,
                     c_image.clone(),
@@ -609,7 +613,7 @@ async fn illusts<'a>(
                     parent_dir,
                     &i.user.id.to_string(),
                     &illust_id,
-                    is_ugoira,
+                    i.r#type == "ugoira",
                     &None,
                     None
                 ));
@@ -632,6 +636,11 @@ async fn illusts<'a>(
             }
         }
         downloader.send(tasks).await;
+        if let Some(limit) = limit {
+            if items_sent >= limit {
+                break 'wh;
+            }
+        }
     }
 
     update_user_id_set(api, &c_user, users_need_update_set).await?;
