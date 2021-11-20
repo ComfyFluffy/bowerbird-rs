@@ -44,13 +44,27 @@ macro_rules! warning {
 }
 
 macro_rules! error {
-	($($arg:tt)*) => {
+	($err:ident, $($arg:tt)*) => {
 		if $crate::log::should_log($crate::config::LogLevel::Debug) {
 			use colored::Colorize;
-			println!("\r{} [{}] {}",
+			println!("\r{} [{}] {}: {}{}",
 			$crate::log::gray_datetime(),
 			"ERROR".bright_red(),
-			format!($($arg)*).bright_red());
+			format!($($arg)*).bright_red(),
+			$err,
+			$err.backtrace()
+				.map_or(" <no backtrace>".to_string(), |b| "\n".to_string() + &b.to_string()));
+		}
+	};
+	($err:ident) => {
+		if $crate::log::should_log($crate::config::LogLevel::Debug) {
+			use colored::Colorize;
+			println!("\r{} [{}] {}{}",
+			$crate::log::gray_datetime(),
+			"ERROR".bright_red(),
+			$err,
+			$err.backtrace()
+				.map_or(" <no backtrace>".to_string(), |b| "\n".to_string() + &b.to_string()));
 		}
 	};
 }

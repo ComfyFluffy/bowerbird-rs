@@ -234,7 +234,7 @@ async fn run_internal() -> crate::Result<()> {
 pub async fn run() {
     match run_internal().await {
         Err(e) => {
-            error!("{}\n{}", e, e.backtrace().unwrap());
+            error!(e);
             process::exit(1);
         }
         _ => {}

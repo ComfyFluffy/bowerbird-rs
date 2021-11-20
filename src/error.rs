@@ -14,9 +14,7 @@ pub enum Error {
         backtrace: Backtrace,
     },
     #[snafu(display("try to save config without path"))]
-    ConfigPathNotSet {
-        backtrace: Backtrace,
-    },
+    ConfigPathNotSet { backtrace: Backtrace },
     #[snafu(display("Cannot parse proxy in config file: {}", source))]
     ProxyParse {
         source: reqwest::Error,
@@ -67,30 +65,26 @@ pub enum Error {
         source: reqwest::Error,
         backtrace: Backtrace,
     },
+    #[snafu(display("Error on download hook `{}`: {}", hook, source))]
+    DownloadHook {
+        hook: &'static str,
+        source: crate::downloader::BoxError,
+    },
+    #[snafu(display("Error on mongodb: {}", source))]
     MongoDB {
         source: mongodb::error::Error,
         backtrace: Backtrace,
     },
+    #[snafu(display("Got value that cannot be parsed from mongodb: {}", source))]
     MongoValueAccess {
         source: mongodb::bson::document::ValueAccessError,
         backtrace: Backtrace,
     },
-    MongoNotMatch {
-        backtrace: Backtrace,
-    },
-    MongoBsonConvert {
+    #[snafu(display("Data struct cannot be parsed from mongodb"))]
+    MongoNotMatch { backtrace: Backtrace },
+    #[snafu(display("Error while serializing to bson: {}", source))]
+    MongoBsonSerialize {
         source: mongodb::bson::ser::Error,
-        backtrace: Backtrace,
-    },
-    Image {
-        source: image::ImageError,
-        backtrace: Backtrace,
-    },
-    ImageColorThief {
-        source: color_thief::Error,
-        backtrace: Backtrace,
-    },
-    UgoiraToVideo {
         backtrace: Backtrace,
     },
 }

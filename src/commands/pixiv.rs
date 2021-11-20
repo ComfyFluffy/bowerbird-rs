@@ -15,7 +15,7 @@ use reqwest::{Method, Url};
 use snafu::ResultExt;
 
 use crate::{
-    downloader::{ClosureFuture, Task, TaskHooks, TaskOptions},
+    downloader::{BoxError, ClosureFuture, Task, TaskHooks, TaskOptions},
     error,
     log::{info, warning},
     models::{
@@ -144,59 +144,57 @@ fn task_from_illust(
             let path = t.options.path.clone().unwrap();
 
             async move {
-                spawn_blocking(
-                    move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                        let mut file = std::fs::File::open(&path)?;
-                        let mut zip_file = zip::ZipArchive::new(&mut file)?;
-                        let delay = delay.unwrap();
-                        let mut path_mp4 = path.clone();
-                        path_mp4.set_extension("mp4");
+                spawn_blocking(move || -> Result<(), BoxError> {
+                    let mut file = std::fs::File::open(&path)?;
+                    let mut zip_file = zip::ZipArchive::new(&mut file)?;
+                    let delay = delay.unwrap();
+                    let mut path_mp4 = path.clone();
+                    path_mp4.set_extension("mp4");
 
-                        let mut ffmpeg = Command::new(&ffmpeg_path)
-                            .args([
-                                "-y",
-                                "-hide_banner",
-                                "-loglevel",
-                                "error",
-                                "-f",
-                                "image2pipe",
-                                "-framerate",
-                                "60",
-                                "-i",
-                                "-",
-                                "-c:v",
-                                "libx264",
-                                "-preset",
-                                "slow",
-                                "-crf",
-                                "22",
-                                "-pix_fmt",
-                                "yuv420p",
-                            ])
-                            .arg(path_mp4.as_os_str())
-                            .stdin(Stdio::piped())
-                            .spawn()?;
-                        let mut stdin = ffmpeg.stdin.take().unwrap();
+                    let mut ffmpeg = Command::new(&ffmpeg_path)
+                        .args([
+                            "-y",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-f",
+                            "image2pipe",
+                            "-framerate",
+                            "60",
+                            "-i",
+                            "-",
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            "slow",
+                            "-crf",
+                            "22",
+                            "-pix_fmt",
+                            "yuv420p",
+                        ])
+                        .arg(path_mp4.as_os_str())
+                        .stdin(Stdio::piped())
+                        .spawn()?;
+                    let mut stdin = ffmpeg.stdin.take().unwrap();
 
-                        for i in 0..zip_file.len() {
-                            let delay_frame: f64 = delay
-                                .get(i)
-                                .ok_or(error::UgoiraToVideo.build())?
-                                .clone()
-                                .into();
-                            for _ in 0..(delay_frame / (1000.0 / 60.0)).round() as i64 {
-                                let mut file = zip_file.by_index(i)?;
-                                std::io::copy(&mut file, &mut stdin)?;
-                            }
+                    for i in 0..zip_file.len() {
+                        let delay_frame: f64 = delay
+                            .get(i)
+                            .ok_or(format!("Cannot get ugoira frame {} from {:?}", i, delay))?
+                            .clone()
+                            .into();
+                        for _ in 0..(delay_frame / (1000.0 / 60.0)).round() as i64 {
+                            let mut file = zip_file.by_index(i)?;
+                            std::io::copy(&mut file, &mut stdin)?;
                         }
-                        drop(stdin);
-                        let status = ffmpeg.wait().context(error::DownloadIO)?;
-                        if !status.success() {
-                            warning!("FFmpeg exited with status {}", status)
-                        }
-                        Ok(())
-                    },
-                )
+                    }
+                    drop(stdin);
+                    let status = ffmpeg.wait()?;
+                    if !status.success() {
+                        warning!("FFmpeg exited with status {}", status)
+                    }
+                    Ok(())
+                })
                 .await
                 .unwrap()?;
                 // zip::read::ZipArchive::new(reader);
@@ -211,11 +209,11 @@ fn task_from_illust(
             let size = t.file_size.unwrap() as i64;
 
             async move {
-                let buffer = tokio::fs::read(&path).await.context(error::DownloadIO)?;
+                let buffer = tokio::fs::read(&path).await?;
 
                 let (w, h, rgb_v) =
-                    spawn_blocking(move || -> crate::Result<(i32, i32, Vec<models::RGB>)> {
-                        let img = image::load_from_memory(&buffer).context(error::Image)?;
+                    spawn_blocking(move || -> Result<(i32, i32, Vec<models::RGB>), BoxError> {
+                        let img = image::load_from_memory(&buffer)?;
                         let (w, h) = img.dimensions();
                         let p = img.thumbnail(512, 512).to_rgba8();
                         let rgb_v = color_thief::get_palette(
@@ -223,8 +221,7 @@ fn task_from_illust(
                             color_thief::ColorFormat::Rgba,
                             5,
                             5,
-                        )
-                        .context(error::ImageColorThief)?
+                        )?
                         .into_iter()
                         .map(|c| models::RGB(c.r.into(), c.g.into(), c.b.into()))
                         .collect();
@@ -247,7 +244,7 @@ fn task_from_illust(
                                     width: w as i32,
                                     palette_rgb: rgb_v,
                                 })
-                            }).context(error::MongoBsonConvert)?
+                            }).context(error::MongoBsonSerialize)?
                         },
                         UpdateOptions::builder().upsert(true).build(),
                     )
@@ -502,7 +499,7 @@ async fn illusts<'a>(
                         "source_id": &illust_id,
                     },
                     doc! {
-                        "$set": &to_bson(&illust).context(error::MongoBsonConvert)?
+                        "$set": &to_bson(&illust).context(error::MongoBsonSerialize)?
                     },
                     UpdateOptions::builder().upsert(true).build(),
                 )
@@ -578,10 +575,10 @@ async fn illusts<'a>(
                     doc! {
                         "source_id": &illust_id,
                         "history.extension": {
-                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonConvert)?
+                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonSerialize)?
                         }
                     },
-                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonConvert)?}},
+                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonSerialize)?}},
                     None,
                 )
                 .await
@@ -682,7 +679,7 @@ pub async fn update_user_detail(
     c_user
         .update_one(
             doc! { "source_id": user_id },
-            doc! { "$set": &to_bson(&user).context(error::MongoBsonConvert)? },
+            doc! { "$set": &to_bson(&user).context(error::MongoBsonSerialize)? },
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
@@ -740,10 +737,10 @@ pub async fn update_user_detail(
             doc! {
                 "source_id": user_id,
                 "history.extension": {
-                    "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonConvert)?
+                    "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonSerialize)?
                 }
             },
-            doc! { "$push": { "history": to_bson(&history).context(error::MongoBsonConvert)? } },
+            doc! { "$push": { "history": to_bson(&history).context(error::MongoBsonSerialize)? } },
             None,
         )
         .await
@@ -845,7 +842,7 @@ async fn novels<'a>(
                         "source_id": &novel_id,
                     },
                     doc! {
-                        "$set": &to_bson(&novel).context(error::MongoBsonConvert)?
+                        "$set": &to_bson(&novel).context(error::MongoBsonSerialize)?
                     },
                     UpdateOptions::builder().upsert(true).build(),
                 )
@@ -876,10 +873,10 @@ async fn novels<'a>(
                     doc! {
                         "source_id": &novel_id,
                         "history.extension": {
-                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonConvert)?
+                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonSerialize)?
                         }
                     },
-                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonConvert)?}},
+                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonSerialize)?}},
                     None,
                 )
                 .await

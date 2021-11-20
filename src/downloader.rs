@@ -120,11 +120,9 @@ impl std::fmt::Debug for RequestBuilder {
     }
 }
 
-pub type ClosureFuture = Box<
-    dyn FnOnce(&Task) -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>>
-        + Send
-        + Sync,
->;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub type ClosureFuture =
+    Box<dyn FnOnce(&Task) -> BoxFuture<'static, Result<(), BoxError>> + Send + Sync>;
 #[derive(Default)]
 pub struct TaskHooks {
     pub on_success: Option<ClosureFuture>,
@@ -156,6 +154,7 @@ pub struct Task {
     pub hooks: Option<TaskHooks>,
     pub options: TaskOptions,
     pub status: TaskStatus,
+    pub hook_status: TaskStatus,
 
     pub file_size: Option<u64>,
     pub url: Url,
@@ -183,6 +182,11 @@ impl Task {
         Task {
             request_builder: RequestBuilder(request_builder),
             options,
+            hook_status: if hooks.is_none() {
+                TaskStatus::Skipped
+            } else {
+                TaskStatus::Pending
+            },
             hooks,
             id: TASK_ID.fetch_add(1, SeqCst),
             file_size: None,
@@ -242,12 +246,12 @@ macro_rules! exec_hook {
         if let Some(ref mut hooks) = $task.hooks {
             if let Some(hook) = hooks.$t.take() {
                 if let Err(e) = hook(&$task).await {
-                    error!(
-                        "Downloader: Task {} hook {} error: {}",
-                        $task.id(),
-                        stringify!($t),
-                        e
-                    )
+                    let err = error::Error::DownloadHook {
+                        hook: stringify!($t),
+                        source: e,
+                    };
+                    error!(err, "Downloader: Task {}", $task.id());
+                    $task.hook_status = TaskStatus::Error(err);
                 }
             }
         }
@@ -294,12 +298,7 @@ impl Downloader {
                             task.status = TaskStatus::Running;
                             match Self::download(client, &mut task).await {
                                 Err(e) => {
-                                    error!(
-                                        "Downloader: Task {} error: {}\n{}",
-                                        task.id(),
-                                        e,
-                                        e.backtrace().unwrap()
-                                    );
+                                    error!(e, "Downloader: Task {}", task.id());
                                     task.status = TaskStatus::Error(e);
                                     exec_hook!(on_error, task);
                                 }
