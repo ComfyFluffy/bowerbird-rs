@@ -73,7 +73,6 @@ pub struct PixivConfig {
     pub proxy_download: String,
     pub refresh_token: String,
     pub language: String,
-    pub ignore_certificate: bool,
 }
 
 impl Default for PixivConfig {
@@ -84,7 +83,6 @@ impl Default for PixivConfig {
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
             language: "en".to_string(),
-            ignore_certificate: false,
         }
     }
 }

@@ -3,19 +3,19 @@ use snafu::{Backtrace, Snafu};
 #[derive(Snafu, Debug)]
 #[snafu(visibility = "pub")]
 pub enum Error {
-    #[snafu(display("JSON error in config file: {}", source))]
+    #[snafu(display("json error in config file: {}", source))]
     ConfigJSON {
         source: serde_json::Error,
         backtrace: Backtrace,
     },
-    #[snafu(display("IO error with config file: {}", source))]
+    #[snafu(display("io error with config file: {}", source))]
     ConfigIO {
         source: std::io::Error,
         backtrace: Backtrace,
     },
     #[snafu(display("try to save config without path"))]
     ConfigPathNotSet { backtrace: Backtrace },
-    #[snafu(display("Cannot parse proxy in config file: {}", source))]
+    #[snafu(display("cannot parse proxy in config file: {}", source))]
     ProxyParse {
         source: reqwest::Error,
         backtrace: Backtrace,
@@ -25,7 +25,7 @@ pub enum Error {
         source: pixivcrab::error::Error,
         backtrace: Backtrace,
     },
-    #[snafu(display("Cannot parse infomation from pixiv: {}", message))]
+    #[snafu(display("cannot parse infomation from pixiv: {}", message))]
     PixivParse {
         message: String,
         backtrace: Backtrace,
@@ -34,18 +34,18 @@ pub enum Error {
         source: url::ParseError,
         backtrace: Backtrace,
     },
-    #[snafu(display("HTTP error while downloading: {}", source))]
+    #[snafu(display("http error while downloading: {}", source))]
     DownloadHTTP {
         source: reqwest::Error,
         backtrace: Backtrace,
     },
-    #[snafu(display("HTTP status is not OK while downloading: {}: {}", status, response))]
+    #[snafu(display("http status is not OK while downloading: {}: {}", status, response))]
     DownloadHTTPStatus {
         status: reqwest::StatusCode,
         response: String,
         backtrace: Backtrace,
     },
-    #[snafu(display("IO error while downloading: {}", source))]
+    #[snafu(display("io error while downloading: {}", source))]
     DownloadIO {
         source: std::io::Error,
         backtrace: Backtrace,
@@ -65,26 +65,28 @@ pub enum Error {
         source: reqwest::Error,
         backtrace: Backtrace,
     },
-    #[snafu(display("Error on download hook `{}`: {}", hook, source))]
+    #[snafu(display("error on download hook `{}`: {}", hook, source))]
     DownloadHook {
         hook: &'static str,
         source: crate::downloader::BoxError,
     },
-    #[snafu(display("Error on mongodb: {}", source))]
+    #[snafu(display("error on mongodb: {}", source))]
     MongoDB {
         source: mongodb::error::Error,
         backtrace: Backtrace,
     },
-    #[snafu(display("Got value that cannot be parsed from mongodb: {}", source))]
+    #[snafu(display("got value that cannot be parsed from mongodb: {}", source))]
     MongoValueAccess {
         source: mongodb::bson::document::ValueAccessError,
         backtrace: Backtrace,
     },
-    #[snafu(display("Data struct cannot be parsed from mongodb"))]
+    #[snafu(display("data struct cannot be parsed from mongodb"))]
     MongoNotMatch { backtrace: Backtrace },
     #[snafu(display("Error while serializing to bson: {}", source))]
-    MongoBsonSerialize {
+    BsonSerialize {
         source: mongodb::bson::ser::Error,
         backtrace: Backtrace,
     },
+    #[snafu(display("error running server: {}", source))]
+    Rocket { source: rocket::Error },
 }

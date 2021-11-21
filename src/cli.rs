@@ -24,6 +24,8 @@ struct Main {
 enum SubcommandMain {
     Pixiv(Pixiv),
     Init,
+    Migrate,
+    Serve,
 }
 
 #[derive(Parser)]
@@ -119,6 +121,11 @@ async fn run_internal() -> crate::Result<()> {
     };
 
     match &opts.subcommand {
+        SubcommandMain::Migrate => {}
+        &SubcommandMain::Serve => {
+            let (_, _, db) = pre_fn.await?;
+            crate::server::run(db).await?;
+        }
         SubcommandMain::Init => {
             config_builder()?;
         }
@@ -138,7 +145,7 @@ async fn run_internal() -> crate::Result<()> {
                 let api = pixivcrab::AppAPI::new(
                     AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
                     &config.pixiv.language,
-                    api_client.danger_accept_invalid_certs(true),
+                    api_client,
                 )
                 .context(error::PixivAPI)?;
                 let auth_result = api.auth().await.context(error::PixivAPI)?;
@@ -230,7 +237,6 @@ async fn run_internal() -> crate::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
 pub async fn run() {
     match run_internal().await {
         Err(e) => {

@@ -37,7 +37,9 @@ pub struct History<H> {
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LocalMedia<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub _id: Option<String>,
+    pub _id: Option<ObjectId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub size: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime: Option<String>,

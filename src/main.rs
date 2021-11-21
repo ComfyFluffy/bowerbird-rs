@@ -1,3 +1,4 @@
-fn main() {
-    bowerbird::cli::run();
+#[tokio::main]
+async fn main() {
+    bowerbird::cli::run().await;
 }

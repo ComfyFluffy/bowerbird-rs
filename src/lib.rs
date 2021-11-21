@@ -7,4 +7,5 @@ mod downloader;
 pub mod error;
 mod log;
 pub mod models;
+mod server;
 pub(crate) type Result<T> = std::result::Result<T, error::Error>;

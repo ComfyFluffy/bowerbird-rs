@@ -32,3 +32,5 @@ bytes = "1"
 mime_guess = "2"
 path-slash = "0.1.4"
 zip = "0.5"
+mime = "0.3"
+rocket = { version = "0.5.0-rc.1", features = ["json"] }

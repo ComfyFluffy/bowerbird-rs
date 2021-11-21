@@ -137,14 +137,19 @@ fn task_from_illust(
             captures.get(4).unwrap().as_str(), // extension
         )
     };
-    let path = parent_dir.join(PathBuf::from_slash(&path_slash));
+    let path_from_slash = PathBuf::from_slash(&path_slash);
+    let path = parent_dir.join(path_from_slash.clone());
+    let url_clone = url.clone();
+
     let on_success_hook: ClosureFuture = if let Some(ffmpeg_path) = ffmpeg_path {
         let ffmpeg_path = ffmpeg_path.clone();
-        Box::new(move |t: &Task| {
-            let path = t.options.path.clone().unwrap();
+        let path = path.clone();
+        let mut path_from_slash = path_from_slash.clone();
+        Box::new(move |t| {
+            let zip_size = t.file_size.unwrap().try_into().unwrap_or_default();
 
             async move {
-                spawn_blocking(move || -> Result<(), BoxError> {
+                let path_mp4 = spawn_blocking(move || -> Result<PathBuf, BoxError> {
                     let mut file = std::fs::File::open(&path)?;
                     let mut zip_file = zip::ZipArchive::new(&mut file)?;
                     let delay = delay.unwrap();
@@ -196,22 +201,60 @@ fn task_from_illust(
                     drop(stdin);
                     let status = ffmpeg.wait()?;
                     if !status.success() {
-                        warning!("FFmpeg exited with status {}", status)
+                        Err(format!("FFmpeg exited with status {}", status))?
                     }
-                    Ok(())
+                    Ok(path_mp4)
                 })
                 .await
                 .unwrap()?;
-                // zip::read::ZipArchive::new(reader);
+
+                c_image
+                    .update_one(
+                        doc! {"url": &url_clone.to_string()},
+                        doc! {
+                            "$set": to_bson(&LocalMedia {
+                                _id: None,
+                                url: None,
+                                local_path: path_from_slash.to_slash_lossy(),
+                                mime: Some("application/zip".to_string()),
+                                size:zip_size,
+                                extension: None::<ImageMedia>
+                            }).context(error::BsonSerialize)?
+                        },
+                        UpdateOptions::builder().upsert(true).build(),
+                    )
+                    .await
+                    .context(error::MongoDB)?;
+
+                path_from_slash.set_extension("mp4");
+
+                let local_path = path_from_slash.to_slash_lossy();
+                c_image
+                    .update_one(
+                        doc! {"local_path": &local_path},
+                        doc! {
+                            "$set": to_bson(&LocalMedia {
+                                _id: None,
+                                url: None,
+                                local_path,
+                                mime: Some("video/mp4".to_string()),
+                                size: tokio::fs::metadata(path_mp4).await?.len().try_into().unwrap_or_default(),
+                                extension: None::<ImageMedia>
+                            }).context(error::BsonSerialize)?
+                        },
+                        UpdateOptions::builder().upsert(true).build(),
+                    )
+                    .await
+                    .context(error::MongoDB)?;
+
                 Ok(())
             }
             .boxed()
         })
     } else {
-        let url_clone = url.clone();
-        Box::new(move |t: &Task| {
+        Box::new(move |t| {
             let path = t.options.path.clone().unwrap();
-            let size = t.file_size.unwrap() as i64;
+            let size = t.file_size.unwrap().try_into().unwrap_or_default();
 
             async move {
                 let buffer = tokio::fs::read(&path).await?;
@@ -237,10 +280,11 @@ fn task_from_illust(
 
                 c_image
                     .update_one(
-                        doc! {"_id": url_clone.as_str()},
+                        doc! {"url": url_clone.as_str()},
                         doc! {
                             "$set": to_bson(&LocalMedia {
-                                _id: Some(url_clone.to_string()),
+                                _id: None,
+                                url: Some(url_clone.to_string()),
                                 local_path: path_slash,
                                 mime: mime_guess::from_path(&path).first().map(|x| x.to_string()),
                                 size,
@@ -249,7 +293,7 @@ fn task_from_illust(
                                     width: w as i32,
                                     palette_rgb: rgb_v,
                                 })
-                            }).context(error::MongoBsonSerialize)?
+                            }).context(error::BsonSerialize)?
                         },
                         UpdateOptions::builder().upsert(true).build(),
                     )
@@ -263,7 +307,7 @@ fn task_from_illust(
 
     Ok(Task::new(
         Box::new(request_builder),
-        url.clone(),
+        url,
         TaskOptions {
             path: Some(path),
             ..Default::default()
@@ -465,7 +509,7 @@ async fn illusts<'a>(
         let tags_to_oid = update_tags(tags_set, &c_tag).await?;
         let users_to_oid = update_users(users_map, &mut users_need_update_set, &c_user).await?;
 
-        let mut tasks = Vec::new();
+        let mut tasks_ugoira = HashMap::new();
 
         for i in &r.illusts {
             let illust_id = i.id.to_string();
@@ -504,7 +548,7 @@ async fn illusts<'a>(
                         "source_id": &illust_id,
                     },
                     doc! {
-                        "$set": &to_bson(&illust).context(error::MongoBsonSerialize)?
+                        "$set": &to_bson(&illust).context(error::BsonSerialize)?
                     },
                     UpdateOptions::builder().upsert(true).build(),
                 )
@@ -567,7 +611,7 @@ async fn illusts<'a>(
                     Some(delay),
                 ) {
                     Ok(task) => {
-                        tasks.push(task);
+                        tasks_ugoira.insert(illust_id.clone(), task);
                     }
                     Err(err) => {
                         warning!("Fail to build task from {}: {}", url, err)
@@ -580,16 +624,17 @@ async fn illusts<'a>(
                     doc! {
                         "source_id": &illust_id,
                         "history.extension": {
-                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonSerialize)?
+                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::BsonSerialize)?
                         }
                     },
-                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonSerialize)?}},
+                    doc! {"$push": {"history": to_bson(&history).context(error::BsonSerialize)?}},
                     None,
                 )
                 .await
                 .context(error::MongoDB)?;
         }
 
+        let mut tasks = Vec::new();
         for i in r.illusts {
             if let Some(limit) = limit {
                 if items_sent >= limit {
@@ -605,6 +650,13 @@ async fn illusts<'a>(
 
             let illust_id = i.id.to_string();
 
+            let is_ugoira = i.r#type == "ugoira";
+            if is_ugoira {
+                if let Some(task) = tasks_ugoira.remove(&illust_id) {
+                    tasks.push(task)
+                }
+            }
+
             if i.page_count == 1 {
                 let task = try_skip!(task_from_illust(
                     &api,
@@ -613,7 +665,7 @@ async fn illusts<'a>(
                     parent_dir,
                     &i.user.id.to_string(),
                     &illust_id,
-                    i.r#type == "ugoira",
+                    is_ugoira,
                     &None,
                     None
                 ));
@@ -688,7 +740,7 @@ pub async fn update_user_detail(
     c_user
         .update_one(
             doc! { "source_id": user_id },
-            doc! { "$set": &to_bson(&user).context(error::MongoBsonSerialize)? },
+            doc! { "$set": &to_bson(&user).context(error::BsonSerialize)? },
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
@@ -746,10 +798,10 @@ pub async fn update_user_detail(
             doc! {
                 "source_id": user_id,
                 "history.extension": {
-                    "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonSerialize)?
+                    "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::BsonSerialize)?
                 }
             },
-            doc! { "$push": { "history": to_bson(&history).context(error::MongoBsonSerialize)? } },
+            doc! { "$push": { "history": to_bson(&history).context(error::BsonSerialize)? } },
             None,
         )
         .await
@@ -851,7 +903,7 @@ async fn novels<'a>(
                         "source_id": &novel_id,
                     },
                     doc! {
-                        "$set": &to_bson(&novel).context(error::MongoBsonSerialize)?
+                        "$set": &to_bson(&novel).context(error::BsonSerialize)?
                     },
                     UpdateOptions::builder().upsert(true).build(),
                 )
@@ -882,10 +934,10 @@ async fn novels<'a>(
                     doc! {
                         "source_id": &novel_id,
                         "history.extension": {
-                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::MongoBsonSerialize)?
+                            "$ne": to_bson(history.extension.as_ref().unwrap()).context(error::BsonSerialize)?
                         }
                     },
-                    doc! {"$push": {"history": to_bson(&history).context(error::MongoBsonSerialize)?}},
+                    doc! {"$push": {"history": to_bson(&history).context(error::BsonSerialize)?}},
                     None,
                 )
                 .await
