@@ -20,8 +20,8 @@ use crate::{
     log::{info, warning},
     models::{
         self,
-        pixiv::{PixivIllustHistory, PixivNovelHistory, PixivUser, PixivUserHistory, PixivWorks},
-        History, ImageMedia, Item, LocalMedia,
+        pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
+        History, ImageMedia, LocalMedia,
     },
 };
 
@@ -70,11 +70,7 @@ macro_rules! try_skip {
     };
 }
 
-type PUser = Item<PixivUser, PixivUserHistory>;
-type PIllust = Item<PixivWorks, PixivIllustHistory>;
-type PNovel = Item<PixivWorks, PixivNovelHistory>;
-
-fn task_from_illust(
+pub fn task_from_illust(
     api: &AppAPI,
     c_image: Collection<Document>,
     raw_url: Option<String>,
@@ -524,17 +520,17 @@ async fn illusts<'a>(
                 .iter()
                 .filter_map(|t| tags_to_oid.get(&t.name).map(|x| x.clone()))
                 .collect();
-            let illust = PIllust {
+            let illust = PixivIllust {
                 parent_id: Some(
                     users_to_oid
                         .get(&i.user.id.to_string())
                         .ok_or(error::MongoNotMatch.build())?
                         .to_owned(),
                 ),
-                tag_ids: Some(tag_ids),
+                tag_ids: tag_ids,
                 source_inaccessible: false,
                 last_modified: Some(DateTime::now()),
-                extension: Some(PixivWorks {
+                extension: Some(pixiv::Works {
                     is_bookmarked: i.is_bookmarked,
                     total_bookmarks: i.total_bookmarks,
                     total_view: i.total_view,
@@ -557,7 +553,7 @@ async fn illusts<'a>(
 
             let mut history = History {
                 last_modified: Some(DateTime::now()),
-                extension: Some(PixivIllustHistory {
+                extension: Some(pixiv::IllustHistory {
                     caption_html: i.caption.clone(),
                     illust_type: i.r#type.clone(),
                     title: i.title.clone(),
@@ -723,9 +719,9 @@ pub async fn update_user_detail(
 ) -> crate::Result<()> {
     info!("Pixiv database: Updating user {}", &user_id);
     let resp = api.user_detail(&user_id).await.context(error::PixivAPI)?;
-    let user = PUser {
+    let user = PixivUser {
         last_modified: Some(DateTime::now()),
-        extension: Some(PixivUser {
+        extension: Some(pixiv::User {
             is_followed: resp.user.is_followed.unwrap_or_default(),
             total_following: Some(resp.profile.total_follow_users),
             total_illust_series: Some(resp.profile.total_illust_series),
@@ -755,7 +751,7 @@ pub async fn update_user_detail(
 
     let history = History {
         last_modified: Some(DateTime::now()),
-        extension: Some(PixivUserHistory {
+        extension: Some(UserHistory {
             account: resp.user.account,
             name: resp.user.name,
             avatar_url: Some(resp.user.profile_image_urls.medium),
@@ -885,11 +881,11 @@ async fn novels<'a>(
                 .collect();
 
             let novel_id = n.id.to_string();
-            let novel = PNovel {
+            let novel = PixivNovel {
                 last_modified: Some(DateTime::now()),
                 parent_id: Some(users_to_oid[&n.user.id.to_string()]),
-                tag_ids: Some(tag_ids),
-                extension: Some(PixivWorks {
+                tag_ids,
+                extension: Some(pixiv::Works {
                     is_bookmarked: n.is_bookmarked,
                     total_bookmarks: n.total_bookmarks,
                     total_view: n.total_view,
@@ -918,7 +914,7 @@ async fn novels<'a>(
             let r = api.novel_text(&novel_id).await.context(error::PixivAPI)?;
 
             let history = History {
-                extension: Some(PixivNovelHistory {
+                extension: Some(NovelHistory {
                     caption_html: n.caption,
                     cover_image_url: n.image_urls.large.clone().or(n.image_urls.medium),
                     date: Some(DateTime::from_chrono(n.create_date)),

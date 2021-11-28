@@ -3,12 +3,15 @@ use std::{
     process::{self, Command},
 };
 
+use bson::{doc, Document};
 use clap::Parser;
+use futures::TryStreamExt;
 use snafu::{ErrorCompat, ResultExt};
 
 use crate::{
     commands, config, error,
-    log::{error, warning},
+    log::{error, info, warning},
+    models,
 };
 
 #[derive(Parser)]
@@ -121,10 +124,68 @@ async fn run_internal() -> crate::Result<()> {
     };
 
     match &opts.subcommand {
-        SubcommandMain::Migrate => {}
-        &SubcommandMain::Serve => {
+        SubcommandMain::Migrate => {
+            use pixivcrab::AuthMethod;
             let (_, _, db) = pre_fn.await?;
-            crate::server::run(db).await?;
+            let c_image = db.collection::<Document>("pixiv_image");
+            let c_illust = db.collection::<models::pixiv::PixivIllust>("pixiv_illust");
+            let c_user = db.collection::<Document>("pixiv_user");
+            let api = pixivcrab::AppAPI::new(
+                AuthMethod::RefreshToken("".to_string()),
+                "zh-cn",
+                reqwest::ClientBuilder::new(),
+            )
+            .unwrap();
+
+            let mut cur = c_illust.find(None, None).await.unwrap();
+            while let Some(i) = cur.try_next().await.unwrap() {
+                for h in i.history {
+                    if let Some(h) = h.extension {
+                        let parent = c_user
+                            .find_one(doc! {"_id": i.parent_id.unwrap()}, None)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .get_str("source_id")
+                            .unwrap()
+                            .to_string();
+                        let len = h.image_urls.len();
+                        for url in h.image_urls {
+                            if url.ends_with(".zip") {
+                                continue;
+                            }
+                            if let None = c_image.find_one(doc! {"url": &url}, None).await.unwrap()
+                            {
+                                let mut task = crate::commands::pixiv::task_from_illust(
+                                    &api,
+                                    c_image.clone(),
+                                    Some(url),
+                                    &PathBuf::from("E:\\PixivDownload"),
+                                    &parent,
+                                    i.source_id.as_ref().unwrap(),
+                                    len > 1,
+                                    &None,
+                                    None,
+                                )
+                                .unwrap();
+                                if let Ok(m) = task.options.path.as_ref().unwrap().metadata() {
+                                    warning!("{:?}", task);
+                                    task.file_size = Some(m.len());
+                                    (task.hooks.take().unwrap().on_success.unwrap())(&task)
+                                        .await
+                                        .unwrap();
+                                } else {
+                                    info!("{:?}", task);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        &SubcommandMain::Serve => {
+            let (config, _, db) = pre_fn.await?;
+            crate::server::run(db, config).await?;
         }
         SubcommandMain::Init => {
             config_builder()?;

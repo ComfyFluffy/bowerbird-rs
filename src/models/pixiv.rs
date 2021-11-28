@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PixivUser {
+pub struct User {
     pub is_followed: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,7 +23,7 @@ pub struct PixivUser {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PixivUserHistory {
+pub struct UserHistory {
     pub name: String,
     pub account: String,
     pub is_premium: bool,
@@ -51,14 +51,14 @@ pub struct PixivUserHistory {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PixivWorks {
+pub struct Works {
     pub total_bookmarks: i64,
     pub total_view: i64,
     pub is_bookmarked: bool,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PixivIllustHistory {
+pub struct IllustHistory {
     pub illust_type: String,
     pub caption_html: String,
     pub title: String,
@@ -70,7 +70,7 @@ pub struct PixivIllustHistory {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PixivNovelHistory {
+pub struct NovelHistory {
     pub caption_html: String,
     pub title: String,
     pub text: String,
@@ -80,3 +80,7 @@ pub struct PixivNovelHistory {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<DateTime>,
 }
+
+pub type PixivUser = Item<User, UserHistory>;
+pub type PixivIllust = Item<Works, IllustHistory>;
+pub type PixivNovel = Item<Works, NovelHistory>;

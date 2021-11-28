@@ -9,8 +9,7 @@ pub struct Item<E, H> {
     pub _id: Option<ObjectId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<ObjectId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag_ids: Option<Vec<ObjectId>>,
+    pub tag_ids: Vec<ObjectId>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
@@ -19,8 +18,7 @@ pub struct Item<E, H> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<DateTime>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub history: Option<Vec<History<H>>>,
+    pub history: Vec<History<H>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<E>,

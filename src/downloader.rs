@@ -492,7 +492,8 @@ impl Downloader {
                 }
                 Err(error::Error::DownloadHTTP { source, backtrace }) => {
                     retries_last_min = retries_last_min
-                        .drain_filter(|i| i.elapsed() <= Duration::from_secs(60))
+                        .into_iter()
+                        .filter(|i| i.elapsed() <= Duration::from_secs(60))
                         .collect();
 
                     if retries_last_min.len() > task.options.retries {
