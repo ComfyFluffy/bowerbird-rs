@@ -8,7 +8,7 @@ use std::{
 use bson::doc;
 use error::ServerErrorExt;
 use futures::TryStreamExt;
-use image::ImageOutputFormat;
+use image::{GenericImageView, ImageOutputFormat};
 use mongodb::{
     options::{FindOneOptions, FindOptions},
     Database,
@@ -17,10 +17,10 @@ use reqwest::header::HeaderMap;
 use rocket::{
     fs::FileServer,
     http::{ContentType, Status},
-    response::Redirect,
+    response::{self, Redirect, Responder},
     routes,
     serde::json::Json,
-    State,
+    Request, Response, State,
 };
 use serde_json::Value;
 use snafu::ResultExt;
@@ -33,10 +33,7 @@ use self::error::ErrorResponse;
 mod error;
 
 type Result<T> = std::result::Result<T, ErrorResponse>;
-// async fn media_by_url(db: &State<Database>, collection: &str) -> Redirect {
-//     db.collection(collection).find_one(filter, options);
-//     Redirect::temporary()
-// }
+
 struct PixivProxy(reqwest::Client);
 
 #[derive(Debug)]
@@ -50,32 +47,11 @@ impl std::fmt::Display for StrErr {
 
 impl std::error::Error for StrErr {}
 
-// #[rocket::get("/proxy?<url>")]
-// async fn proxy_pixiv(url: &str, client: &State<PixivProxy>) -> Result<Vec<u8>> {
-//     let url: Url = url.parse().with_status(Status::BadRequest)?;
-//     if let Some(h) = url.host() {
-//         let h = h.to_string();
-//         if h == "i.pximg.net" || h == "s.pximg.net" {
-//             let r = client
-//                 .0
-//                 .get(url)
-//                 .send()
-//                 .await
-//                 .with_status(Status::BadGateway)?
-//                 .bytes()
-//                 .await
-//                 .with_status(Status::BadGateway)?;
-//             return Ok(r.to_vec());
-//         }
-//     }
-//     Err(StrErr("unsupported host")).with_status(Status::BadRequest)
-// }
 //TODO: Proxy
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 struct ThumbnailCacheKey {
-    max_width: u32,
-    max_height: u32,
+    size: u32,
     local_path: String,
 }
 
@@ -160,8 +136,7 @@ type ThumbnailCache = HashMap<ThumbnailCacheKey, Vec<u8>>;
 
 fn cached_image_thumbnail(
     local_path: String,
-    max_width: u32,
-    max_height: u32,
+    size: u32,
     cache: Arc<Mutex<ThumbnailCache>>,
 ) -> Result<Vec<u8>> {
     let mut cache_lock = cache.lock().unwrap();
@@ -171,8 +146,7 @@ fn cached_image_thumbnail(
     }
     if let Some(b) = cache_lock.get(&ThumbnailCacheKey {
         local_path: local_path.clone(),
-        max_height,
-        max_width,
+        size,
     }) {
         Ok(b.clone())
     } else {
@@ -181,20 +155,34 @@ fn cached_image_thumbnail(
             .with_status(Status::NotFound)?
             .decode()
             .with_status(Status::InternalServerError)?;
-        let img = img.thumbnail(max_width, max_height);
+        let (w, h) = img.dimensions();
+        let wdh = (w as f64) / (h as f64);
+        let img = if wdh < 0.75 {
+            img.resize_to_fill(size / 4 * 3, size, image::imageops::FilterType::Lanczos3)
+        } else if wdh > 1.33 {
+            img.resize_to_fill(size, size / 4 * 3, image::imageops::FilterType::Lanczos3)
+        } else {
+            img.resize(size, size, image::imageops::FilterType::Lanczos3)
+        };
         let mut b = Vec::with_capacity(1024 * 50);
 
         img.write_to(&mut b, ImageOutputFormat::Jpeg(85))
             .with_status(Status::InternalServerError)?;
-        cache.lock().unwrap().insert(
-            ThumbnailCacheKey {
-                local_path,
-                max_height,
-                max_width,
-            },
-            b.clone(),
-        );
+        cache
+            .lock()
+            .unwrap()
+            .insert(ThumbnailCacheKey { local_path, size }, b.clone());
         Ok(b)
+    }
+}
+
+struct CachedResponse(Vec<u8>);
+impl<'r> Responder<'r, 'static> for CachedResponse {
+    fn respond_to(self, r: &'r Request<'_>) -> response::Result<'static> {
+        Response::build()
+            .join(self.0.respond_to(r)?)
+            .raw_header("cache-control", "max-age=31536000")
+            .ok()
     }
 }
 
@@ -204,15 +192,15 @@ async fn pixiv_image(
     size: u32,
     config: &State<PixivConfig>,
     cache: &State<Arc<Mutex<ThumbnailCache>>>,
-) -> Result<(ContentType, Vec<u8>)> {
+) -> Result<(ContentType, CachedResponse)> {
     let path = config.storage_dir.join(path);
     let cache = cache.inner().clone();
     let b = spawn_blocking(move || {
-        cached_image_thumbnail(path.to_string_lossy().to_string(), size, size, cache)
+        cached_image_thumbnail(path.to_string_lossy().to_string(), size, cache)
     })
     .await
     .unwrap()?;
-    Ok((ContentType::JPEG, b))
+    Ok((ContentType::JPEG, CachedResponse(b)))
 }
 
 #[derive(Debug, Clone)]
@@ -234,17 +222,17 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
         storage_dir: config.sub_dir(&config.pixiv.storage_dir),
     };
     rocket::build()
-        .mount("/api/bson", routes![find])
+        .mount("/v1/bson", routes![find])
         .manage(db)
         .manage(PixivProxy(pixiv_proxy))
         .manage(thumbnial_cache)
         .mount(
-            "/api/pixiv/static",
+            "/v1/pixiv/static",
             FileServer::new(pixiv_config.storage_dir.clone(), rocket::fs::Options::None),
         )
         .manage(pixiv_config)
         .mount(
-            "/api/pixiv",
+            "/v1/pixiv",
             routes![find_pixiv_media_by_url, find_pixiv_media_by_id, pixiv_image],
         )
         .launch()

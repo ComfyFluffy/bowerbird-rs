@@ -123,7 +123,7 @@ async fn run_internal() -> crate::Result<()> {
 
     match &opts.subcommand {
         SubcommandMain::Migrate => {}
-        &SubcommandMain::Serve => {
+        SubcommandMain::Serve => {
             let (config, _, db) = pre_fn.await?;
             crate::server::run(db, config).await?;
         }
