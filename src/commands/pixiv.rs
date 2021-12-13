@@ -51,6 +51,11 @@ async fn illusts<'a>(
             ffmpeg_path,
         )
         .await;
+        if let Some(limit) = limit {
+            if items_sent >= limit {
+                break;
+            }
+        }
     }
 
     database::update_user_id_set(api, &c_user, users_need_update_set).await?;
@@ -114,6 +119,11 @@ pub async fn novels<'a>(
             &mut users_need_update_set,
         )
         .await?;
+        if let Some(limit) = limit {
+            if items_sent >= limit {
+                break;
+            }
+        }
     }
 
     database::update_user_id_set(api, &c_user, users_need_update_set).await?;

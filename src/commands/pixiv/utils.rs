@@ -11,7 +11,7 @@ use snafu::ResultExt;
 
 use crate::{downloader::BoxError, error, log::warning, models};
 
-pub fn ugoira2mp4<P1: AsRef<Path>, P2: AsRef<Path>>(
+pub fn ugoira_to_mp4<P1: AsRef<Path>, P2: AsRef<Path>>(
     ffmpeg_path: P1,
     zip_path: P2,
     frame_delay: Vec<i32>,

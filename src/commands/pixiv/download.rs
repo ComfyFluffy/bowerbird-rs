@@ -136,7 +136,11 @@ fn task_from_illust(
             async move {
                 let zip_path_cloned = zip_path.clone();
                 spawn_blocking(move || {
-                    utils::ugoira2mp4(&ffmpeg_path, &zip_path_cloned, ugoira_frame_delay.unwrap())
+                    utils::ugoira_to_mp4(
+                        &ffmpeg_path,
+                        &zip_path_cloned,
+                        ugoira_frame_delay.unwrap(),
+                    )
                 })
                 .await
                 .unwrap()?;
