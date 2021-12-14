@@ -21,7 +21,7 @@ use crate::{
 use mongodb::{
     bson::{doc, oid::ObjectId, to_bson, DateTime, Document},
     options::{self, FindOneAndUpdateOptions, UpdateOptions},
-    Collection,
+    Collection, Database, IndexModel,
 };
 
 async fn update_users(
@@ -569,6 +569,45 @@ pub async fn save_novels(
                 .await
                 .context(error::MongoDB)?;
     }
+
+    Ok(())
+}
+
+pub async fn create_indexes(db: &Database) -> crate::Result<()> {
+    let c_illust = db.collection::<Document>("pixiv_illust");
+    let c_image = db.collection::<Document>("pixiv_image");
+    let c_novel = db.collection::<Document>("pixiv_novel");
+    let c_tag = db.collection::<Document>("pixiv_tag");
+    let c_user = db.collection::<Document>("pixiv_user");
+
+    let item_indexes: Vec<IndexModel> = ["source_id", "tag_ids", "parent_id"]
+        .into_iter()
+        .map(|k| IndexModel::builder().keys(doc! { k: 1 }).build())
+        .collect();
+
+    for c in [c_illust, c_novel] {
+        c.create_indexes(item_indexes.clone(), None)
+            .await
+            .context(error::MongoDB)?;
+    }
+
+    c_user
+        .create_indexes(item_indexes[..2].to_vec(), None)
+        .await
+        .context(error::MongoDB)?;
+
+    c_image
+        .create_index(IndexModel::builder().keys(doc! { "url": 1 }).build(), None)
+        .await
+        .context(error::MongoDB)?;
+
+    c_tag
+        .create_index(
+            IndexModel::builder().keys(doc! { "alias": 1 }).build(),
+            None,
+        )
+        .await
+        .context(error::MongoDB)?;
 
     Ok(())
 }

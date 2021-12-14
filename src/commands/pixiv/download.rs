@@ -216,11 +216,8 @@ pub async fn download_illusts(
 ) {
     let mut tasks = Vec::new();
     for i in illusts {
-        if let Some(limit) = limit {
-            if *items_sent >= limit {
-                downloader.send(tasks).await;
-                return;
-            }
+        if super::limit_reached(limit, *items_sent) {
+            return;
         }
         *items_sent += 1;
 
@@ -286,9 +283,7 @@ pub async fn download_illusts(
         }
     }
     downloader.send(tasks).await;
-    if let Some(limit) = limit {
-        if *items_sent >= limit {
-            return;
-        }
+    if super::limit_reached(limit, *items_sent) {
+        return;
     }
 }

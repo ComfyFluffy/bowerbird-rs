@@ -136,6 +136,7 @@ async fn run_internal() -> crate::Result<()> {
             let limit = c.limit;
             let pre_fn = async {
                 let (mut config, ffmpeg_path, db) = pre_fn.await?;
+                commands::pixiv::database::create_indexes(&db).await?;
                 let mut api_client = reqwest::ClientBuilder::new();
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
                     api_client = api_client.proxy(proxy);

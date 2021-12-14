@@ -1,0 +1,11 @@
+{
+    "spellright.language": [
+        "en"
+    ],
+    "spellright.documentTypes": [
+        "latex",
+        "markdown"
+    ],
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+}

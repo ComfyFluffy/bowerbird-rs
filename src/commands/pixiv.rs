@@ -6,9 +6,20 @@ use std::{
 
 use mongodb::{bson::Document, Database};
 
-mod database;
+pub mod database;
 mod download;
 mod utils;
+
+fn limit_reached<T>(limit: Option<T>, items_sent: T) -> bool
+where
+    T: std::cmp::PartialOrd,
+{
+    if let Some(limit) = limit {
+        items_sent >= limit
+    } else {
+        false
+    }
+}
 
 async fn illusts<'a>(
     db: &Database,
@@ -51,10 +62,8 @@ async fn illusts<'a>(
             ffmpeg_path,
         )
         .await;
-        if let Some(limit) = limit {
-            if items_sent >= limit {
-                break;
-            }
+        if limit_reached(limit, items_sent) {
+            break;
         }
     }
 
@@ -92,7 +101,7 @@ pub async fn illust_bookmarks(
     illusts(db, api, downloader, pager, &parent_dir, limit, ffmpeg_path).await
 }
 
-pub async fn novels<'a>(
+async fn novels<'a>(
     mut pager: pixivcrab::Pager<'a, pixivcrab::models::novel::Response>,
     db: &Database,
     api: &AppAPI,
@@ -119,10 +128,8 @@ pub async fn novels<'a>(
             &mut users_need_update_set,
         )
         .await?;
-        if let Some(limit) = limit {
-            if items_sent >= limit {
-                break;
-            }
+        if limit_reached(limit, items_sent) {
+            break;
         }
     }
 
