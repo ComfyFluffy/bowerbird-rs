@@ -9,11 +9,15 @@ use pixivcrab::Pager;
 use rocket::serde::DeserializeOwned;
 use snafu::ResultExt;
 
-use crate::{downloader::BoxError, error, log::warning, models};
+use crate::{
+    error::{self, BoxError},
+    log::warning,
+    model,
+};
 
-pub fn ugoira_to_mp4<P1: AsRef<Path>, P2: AsRef<Path>>(
-    ffmpeg_path: P1,
-    zip_path: P2,
+pub fn ugoira_to_mp4(
+    ffmpeg_path: impl AsRef<Path>,
+    zip_path: impl AsRef<Path>,
     frame_delay: Vec<i32>,
 ) -> Result<PathBuf, BoxError> {
     let zip_path = zip_path.as_ref();
@@ -54,13 +58,10 @@ pub fn ugoira_to_mp4<P1: AsRef<Path>, P2: AsRef<Path>>(
     let mut t: f32 = 0.0;
     let mut frame = 0;
     for i in 0..zip_file.len() {
-        t += frame_delay
-            .get(i)
-            .ok_or(format!(
-                "Cannot get ugoira frame {} from {:?}",
-                i, frame_delay
-            ))?
-            .clone() as f32;
+        t += *frame_delay.get(i).ok_or(format!(
+            "Cannot get ugoira frame {} from {:?}",
+            i, frame_delay
+        ))? as f32;
         let next_frame = (t / (1000.0 / 60.0)).round() as i32;
         for _ in frame..next_frame {
             let mut file = zip_file.by_index(i)?;
@@ -76,9 +77,9 @@ pub fn ugoira_to_mp4<P1: AsRef<Path>, P2: AsRef<Path>>(
     Ok(mp4_path)
 }
 
-pub fn get_palette<P: AsRef<Path>>(
-    image_path: P,
-) -> Result<((i32, i32), Vec<models::RGB>), BoxError> {
+pub fn get_palette(
+    image_path: impl AsRef<Path>,
+) -> Result<((i32, i32), Vec<model::RGB>), BoxError> {
     let img = image::open(image_path)?;
     let (w, h) = img.dimensions();
     let thumbnail = img.thumbnail(512, 512).to_rgba8();
@@ -86,7 +87,7 @@ pub fn get_palette<P: AsRef<Path>>(
 
     let rgb_v = color_thief::get_palette(thumbnail.as_raw(), color_thief::ColorFormat::Rgba, 5, 5)?
         .into_iter()
-        .map(|c| models::RGB(c.r.into(), c.g.into(), c.b.into()))
+        .map(|c| model::RGB(c.r.into(), c.g.into(), c.b.into()))
         .collect();
     // Convert to i32 here to save to bson.
     Ok(((w as i32, h as i32), rgb_v))

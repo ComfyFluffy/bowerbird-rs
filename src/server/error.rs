@@ -5,7 +5,7 @@ use rocket::serde::json::Json;
 use serde::{Deserialize, Serialize};
 
 pub use crate::error::*;
-use crate::{downloader::BoxError, log::warning};
+use crate::log::warning;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ErrorResponse {

@@ -6,6 +6,8 @@ use std::{
 
 use mongodb::{bson::Document, Database};
 
+use crate::downloader::Aria2Downloader;
+
 pub mod database;
 mod download;
 mod utils;
@@ -21,14 +23,20 @@ where
     }
 }
 
-async fn illusts<'a>(
+#[derive(Debug, Clone)]
+pub struct TaskConfig {
+    pub ffmpeg_path: Option<PathBuf>,
+    pub proxy: Option<String>,
+    pub parent_dir: PathBuf,
+}
+
+async fn illusts(
     db: &Database,
     api: &AppAPI,
-    downloader: &crate::downloader::Downloader,
-    mut pager: pixivcrab::Pager<'a, pixivcrab::models::illust::Response>,
-    parent_dir: &PathBuf,
+    downloader: &Aria2Downloader,
+    mut pager: pixivcrab::Pager<'_, pixivcrab::models::illust::Response>,
     limit: Option<u32>,
-    ffmpeg_path: &Option<PathBuf>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let c_illust = db.collection::<Document>("pixiv_illust");
     let c_user = db.collection::<Document>("pixiv_user");
@@ -53,15 +61,13 @@ async fn illusts<'a>(
         download::download_illusts(
             &r.illusts,
             &mut ugoira_map,
-            api,
             downloader,
             &c_image,
             &mut items_sent,
             limit,
-            parent_dir,
-            ffmpeg_path,
+            task_config,
         )
-        .await;
+        .await?;
         if limit_reached(limit, items_sent) {
             break;
         }
@@ -75,30 +81,28 @@ async fn illusts<'a>(
 pub async fn illust_uploads(
     api: &pixivcrab::AppAPI,
     db: &mongodb::Database,
-    downloader: &crate::downloader::Downloader,
-    parent_dir: PathBuf,
+    downloader: &Aria2Downloader,
     user_id: &str,
     limit: Option<u32>,
-    ffmpeg_path: &Option<PathBuf>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let pager = api.illust_uploads(user_id);
 
-    illusts(db, api, downloader, pager, &parent_dir, limit, ffmpeg_path).await
+    illusts(db, api, downloader, pager, limit, task_config).await
 }
 
 pub async fn illust_bookmarks(
     api: &pixivcrab::AppAPI,
     db: &mongodb::Database,
-    downloader: &crate::downloader::Downloader,
-    parent_dir: PathBuf,
+    downloader: &Aria2Downloader,
     user_id: &str,
     private: bool,
     limit: Option<u32>,
-    ffmpeg_path: &Option<PathBuf>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let pager = api.illust_bookmarks(user_id, private);
 
-    illusts(db, api, downloader, pager, &parent_dir, limit, ffmpeg_path).await
+    illusts(db, api, downloader, pager, limit, task_config).await
 }
 
 async fn novels<'a>(

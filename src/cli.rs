@@ -5,15 +5,15 @@ use std::{
 
 use clap::Parser;
 
-use snafu::{ErrorCompat, ResultExt};
+use snafu::ResultExt;
 
 use crate::{
-    commands, config, error,
+    command, config, error,
     log::{error, warning},
 };
 
 #[derive(Parser)]
-#[clap(version = env!("CARGO_PKG_VERSION"))]
+#[clap(version)]
 struct Main {
     #[clap(short, long)]
     config: Option<String>,
@@ -136,7 +136,7 @@ async fn run_internal() -> crate::Result<()> {
             let limit = c.limit;
             let pre_fn = async {
                 let (mut config, ffmpeg_path, db) = pre_fn.await?;
-                commands::pixiv::database::create_indexes(&db).await?;
+                command::pixiv::database::create_indexes(&db).await?;
                 let mut api_client = reqwest::ClientBuilder::new();
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
                     api_client = api_client.proxy(proxy);
@@ -160,47 +160,44 @@ async fn run_internal() -> crate::Result<()> {
                 SubcommandPixiv::Illust(c) => {
                     let pre_fn = async {
                         let (config, ffmpeg_path, db, api, selected_user_id) = pre_fn.await?;
-                        let mut downloader_client = reqwest::ClientBuilder::new();
-                        if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_download)? {
-                            downloader_client = downloader_client.proxy(proxy);
-                        }
-                        let downloader = crate::downloader::Downloader::new(
-                            downloader_client.build().context(error::DownloadHTTP)?,
-                            5,
-                        );
-                        Ok((config, ffmpeg_path, db, api, selected_user_id, downloader))
+                        let downloader =
+                            crate::downloader::Aria2Downloader::new(&config.aria2_path).await?;
+                        let task_config = command::pixiv::TaskConfig {
+                            ffmpeg_path,
+                            parent_dir: config.sub_dir(&config.pixiv.storage_dir),
+                            proxy: config.pxoxy_string(&config.pixiv.proxy_download),
+                        };
+                        Ok((db, api, selected_user_id, downloader, task_config))
                     };
                     match &c.subcommand {
                         SubcommandPixivAction::Bookmarks(c) => {
-                            let (config, ffmpeg_path, db, api, selected_user_id, downloader) =
+                            let (db, api, selected_user_id, downloader, task_config) =
                                 pre_fn.await?;
-                            commands::pixiv::illust_bookmarks(
+                            command::pixiv::illust_bookmarks(
                                 &api,
                                 &db,
                                 &downloader,
-                                config.sub_dir(&config.pixiv.storage_dir),
                                 &selected_user_id,
                                 c.private,
                                 limit,
-                                &ffmpeg_path,
+                                &task_config,
                             )
                             .await?;
-                            downloader.wait().await;
+                            downloader.wait_shutdown().await;
                         }
                         SubcommandPixivAction::Uploads => {
-                            let (config, ffmpeg_path, db, api, selected_user_id, downloader) =
+                            let (db, api, selected_user_id, downloader, task_config) =
                                 pre_fn.await?;
-                            commands::pixiv::illust_uploads(
+                            command::pixiv::illust_uploads(
                                 &api,
                                 &db,
                                 &downloader,
-                                config.sub_dir(&config.pixiv.storage_dir),
                                 &selected_user_id,
                                 limit,
-                                &ffmpeg_path,
+                                &task_config,
                             )
                             .await?;
-                            downloader.wait().await;
+                            downloader.wait_shutdown().await;
                         }
                     }
                 }
@@ -209,7 +206,7 @@ async fn run_internal() -> crate::Result<()> {
                     match &c.subcommand {
                         SubcommandPixivAction::Bookmarks(c) => {
                             let (_, _, db, api, selected_user_id) = pre_fn.await?;
-                            commands::pixiv::novel_bookmarks(
+                            command::pixiv::novel_bookmarks(
                                 &api,
                                 &db,
                                 update_exists,
@@ -221,7 +218,7 @@ async fn run_internal() -> crate::Result<()> {
                         }
                         SubcommandPixivAction::Uploads => {
                             let (_, _, db, api, selected_user_id) = pre_fn.await?;
-                            commands::pixiv::novel_uploads(
+                            command::pixiv::novel_uploads(
                                 &api,
                                 &db,
                                 update_exists,

@@ -216,7 +216,7 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
             headers
         })
         .build()
-        .context(error::DownloadRequestBuild)?;
+        .unwrap();
     let thumbnial_cache: Arc<Mutex<ThumbnailCache>> = Arc::new(Mutex::new(HashMap::new()));
     let pixiv_config = PixivConfig {
         storage_dir: config.sub_dir(&config.pixiv.storage_dir),

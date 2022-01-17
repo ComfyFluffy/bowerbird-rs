@@ -28,6 +28,7 @@ pub struct Config {
     pub pixiv: PixivConfig,
     pub proxy_all: String,
     pub ffmpeg_path: String,
+    pub aria2_path: String,
 }
 
 impl Default for Config {
@@ -45,6 +46,7 @@ impl Default for Config {
             pixiv: PixivConfig::default(),
             proxy_all: "".to_string(),
             ffmpeg_path: "".to_string(),
+            aria2_path: "aria2c".to_string(),
         }
     }
 }
@@ -88,7 +90,7 @@ impl Default for PixivConfig {
 }
 
 impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Config> {
+    pub fn from_file(path: impl AsRef<Path>) -> crate::Result<Config> {
         if !path.as_ref().exists() {
             info!("Creating config file: {}", path.as_ref().to_string_lossy());
             let mut defaults = Config::default();
@@ -122,7 +124,7 @@ impl Config {
         serde_json::to_writer_pretty(file, &self).context(error::ConfigJSON)
     }
 
-    pub fn sub_dir<P: AsRef<Path>>(&self, dir: P) -> PathBuf {
+    pub fn sub_dir(&self, dir: impl AsRef<Path>) -> PathBuf {
         if dir.as_ref().is_relative() {
             PathBuf::from(&self.root_storage_dir).join(dir)
         } else {
@@ -150,6 +152,18 @@ impl Config {
             ))
         } else {
             Ok(None)
+        }
+    }
+
+    pub fn pxoxy_string(&self, url: &str) -> Option<String> {
+        if url.is_empty() {
+            if self.proxy_all.is_empty() {
+                None
+            } else {
+                Some(self.proxy_all.clone())
+            }
+        } else {
+            Some(self.proxy_all.clone())
         }
     }
 

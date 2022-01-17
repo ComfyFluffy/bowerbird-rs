@@ -9,10 +9,9 @@ use std::{
 };
 
 use crate::{
-    downloader::BoxError,
-    error,
+    error::{self, BoxError},
     log::{info, warning},
-    models::{
+    model::{
         pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
         History, ImageMedia, LocalMedia, RGB,
     },
@@ -156,11 +155,11 @@ pub async fn update_user_id_set(
     users_need_update_set: BTreeSet<String>,
 ) -> crate::Result<()> {
     let need_sleep = users_need_update_set.len() > 500;
-    // Sleep for 2s to avoid 403 error
+    // Sleep for 1s to avoid 403 error
     for user_id in users_need_update_set {
         update_user_detail(api, &user_id, c_user).await?;
         if need_sleep {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
     Ok(())
@@ -259,14 +258,14 @@ async fn update_user_detail(
     Ok(())
 }
 
-pub async fn save_image<P: AsRef<Path>>(
+pub async fn save_image(
     c_image: &Collection<Document>,
     size: i64,
     (w, h): (i32, i32),
     palette_rgb: Vec<RGB>,
     url: String,
     image_path_db: String,
-    image_path: P,
+    image_path: impl AsRef<Path>,
 ) -> crate::Result<()> {
     c_image
         .update_one(
@@ -298,6 +297,7 @@ pub async fn save_image_ugoira(
     mut zip_path: PathBuf,
     zip_path_db: String,
     zip_size: i64,
+    with_mp4: bool,
 ) -> Result<(), BoxError> {
     c_image
         .update_one(
@@ -317,14 +317,15 @@ pub async fn save_image_ugoira(
         .await
         .context(error::MongoDB)?;
 
-    let mut zip_path_db_slash = PathBuf::from_slash(zip_path_db);
-    zip_path_db_slash.set_extension("mp4");
-    let mp4_path_db = zip_path_db_slash.to_slash_lossy();
+    if with_mp4 {
+        let mut zip_path_db_slash = PathBuf::from_slash(zip_path_db);
+        zip_path_db_slash.set_extension("mp4");
+        let mp4_path_db = zip_path_db_slash.to_slash_lossy();
 
-    zip_path.set_extension("mp4");
-    let mp4_path = zip_path;
+        zip_path.set_extension("mp4");
+        let mp4_path = zip_path;
 
-    c_image
+        c_image
         .update_one(
             doc! {"local_path": &mp4_path_db},
             doc! {
@@ -341,6 +342,7 @@ pub async fn save_image_ugoira(
         )
         .await
         .context(error::MongoDB)?;
+    }
     Ok(())
 }
 
