@@ -104,7 +104,7 @@ fn task_from_illust(
     is_multi_page: bool,
     ugoira_frame_delay: Option<Vec<i32>>,
     task_config: &TaskConfig,
-) -> crate::Result<Task> {
+) -> crate::Result<Option<Task>> {
     let url = url.ok_or(
         error::PixivParse {
             message: "empty url".to_string(),
@@ -142,6 +142,10 @@ fn task_from_illust(
         .parent_dir
         .join(PathBuf::from_slash(&path_slash));
 
+    if path.exists() {
+        return Ok(None);
+    }
+
     let on_success_hook = if let Some(ugoira_frame_delay) = ugoira_frame_delay {
         // The task is an ugoira zip.
         on_success_ugoira(
@@ -157,7 +161,7 @@ fn task_from_illust(
         on_success_illust(url.clone(), path.clone(), c_image, path_slash).boxed()
     };
 
-    Ok(Task {
+    Ok(Some(Task {
         hooks: Some(TaskHooks {
             on_success: Some(on_success_hook),
             ..Default::default()
@@ -165,10 +169,11 @@ fn task_from_illust(
         options: Some(TaskOptions {
             header: Some(vec!["Referer: https://app-api.pixiv.net/".to_string()]),
             all_proxy: task_config.proxy.clone(),
+            out: Some(path.to_string_lossy().to_string()),
             ..Default::default()
         }),
         url,
-    })
+    }))
 }
 
 pub async fn download_illusts(
@@ -207,7 +212,9 @@ pub async fn download_illusts(
                     task_config,
                 ) {
                     Ok(task) => {
-                        tasks.push(task);
+                        if let Some(task) = task {
+                            tasks.push(task);
+                        }
                     }
                     Err(err) => {
                         warning!("Fail to build task from {}: {}", zip_url, err)
@@ -217,7 +224,7 @@ pub async fn download_illusts(
         }
 
         if i.page_count == 1 {
-            let task = try_skip!(task_from_illust(
+            if let Some(task) = try_skip!(task_from_illust(
                 c_image.clone(),
                 i.meta_single_page.original_image_url.clone(),
                 &i.user.id.to_string(),
@@ -225,11 +232,12 @@ pub async fn download_illusts(
                 is_ugoira,
                 None,
                 task_config
-            ));
-            tasks.push(task);
+            )) {
+                tasks.push(task);
+            }
         } else {
             for img in &i.meta_pages {
-                let task = try_skip!(task_from_illust(
+                if let Some(task) = try_skip!(task_from_illust(
                     c_image.clone(),
                     img.image_urls.original.clone(),
                     &i.user.id.to_string(),
@@ -237,8 +245,9 @@ pub async fn download_illusts(
                     true,
                     None,
                     task_config
-                ));
-                tasks.push(task);
+                )) {
+                    tasks.push(task);
+                }
             }
         }
     }

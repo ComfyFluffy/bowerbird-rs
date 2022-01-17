@@ -36,8 +36,7 @@ impl Aria2Downloader {
         let mut child = Command::new(aria2_path)
             .args(&[
                 "--no-conf",
-                "--auto-file-renaming",
-                "false",
+                "--auto-file-renaming=false",
                 "--enable-rpc",
                 "--rpc-listen-port",
                 &port.to_string(),
@@ -55,7 +54,7 @@ impl Aria2Downloader {
             } // aria2 exited unexpectedly
             Err(_) => {} // aria2 continues to run
         };
-        let client = Client::connect(&format!("ws://127.0.0.1:{}", port), Some(token))
+        let client = Client::connect(&format!("ws://127.0.0.1:{}/jsonrpc", port), Some(token))
             .await
             .context(error::Aria2)?;
         Ok(Self {
@@ -65,21 +64,25 @@ impl Aria2Downloader {
         })
     }
 
-    fn map_hook(&self, hook: super::BoxFutureResult) -> BoxFuture<'static, ()> {
+    fn map_hook(&self, hook: Option<super::BoxFutureResult>) -> BoxFuture<'static, ()> {
         let waitgroup = self.waitgroup.clone();
-        async move {
-            if let Err(err) = hook.await {
-                warning!("error on hook: {}", err);
+        if let Some(hook) = hook {
+            async move {
+                if let Err(err) = hook.await {
+                    warning!("error on hook: {}", err);
+                }
+                waitgroup.done();
             }
-            waitgroup.done();
+            .boxed()
+        } else {
+            async move { waitgroup.done() }.boxed()
         }
-        .boxed()
     }
 
     pub async fn add_task(&self, task: Task) -> crate::Result<()> {
         let hooks = task.hooks.map(|hooks| aria2_ws::TaskHooks {
-            on_complete: hooks.on_success.map(|f| self.map_hook(f)),
-            on_error: hooks.on_error.map(|f| self.map_hook(f)),
+            on_complete: Some(self.map_hook(hooks.on_success)),
+            on_error: Some(self.map_hook(hooks.on_error)),
         });
         self.client
             .add_uri(vec![task.url], task.options, None, hooks)
