@@ -17,10 +17,10 @@ use reqwest::header::HeaderMap;
 use rocket::{
     fs::FileServer,
     http::{ContentType, Status},
-    response::{self, Redirect, Responder},
+    response::Redirect,
     routes,
     serde::json::Json,
-    Request, Response, State,
+    State,
 };
 use serde_json::Value;
 use snafu::ResultExt;
@@ -28,9 +28,10 @@ use tokio::task::spawn_blocking;
 
 use crate::config::Config;
 
-use self::error::ErrorResponse;
+use self::{error::ErrorResponse, utils::CachedResponse};
 
 mod error;
+mod utils;
 
 type Result<T> = std::result::Result<T, ErrorResponse>;
 
@@ -139,6 +140,7 @@ fn cached_image_thumbnail(
     size: u32,
     cache: Arc<Mutex<ThumbnailCache>>,
 ) -> Result<Vec<u8>> {
+    use image::imageops::FilterType::Lanczos3;
     let mut cache_lock = cache.lock().unwrap();
     if cache_lock.len() > 200 {
         let k = cache_lock.keys().next().unwrap().clone();
@@ -158,11 +160,11 @@ fn cached_image_thumbnail(
         let (w, h) = img.dimensions();
         let wdh = (w as f64) / (h as f64);
         let img = if wdh < 0.75 {
-            img.resize_to_fill(size / 4 * 3, size, image::imageops::FilterType::Lanczos3)
+            img.resize_to_fill(size / 4 * 3, size, Lanczos3)
         } else if wdh > 1.33 {
-            img.resize_to_fill(size, size / 4 * 3, image::imageops::FilterType::Lanczos3)
+            img.resize_to_fill(size, size / 4 * 3, Lanczos3)
         } else {
-            img.resize(size, size, image::imageops::FilterType::Lanczos3)
+            img.resize(size, size, Lanczos3)
         };
         let mut b = Vec::with_capacity(1024 * 50);
 
@@ -173,16 +175,6 @@ fn cached_image_thumbnail(
             .unwrap()
             .insert(ThumbnailCacheKey { local_path, size }, b.clone());
         Ok(b)
-    }
-}
-
-struct CachedResponse(Vec<u8>);
-impl<'r> Responder<'r, 'static> for CachedResponse {
-    fn respond_to(self, r: &'r Request<'_>) -> response::Result<'static> {
-        Response::build()
-            .join(self.0.respond_to(r)?)
-            .raw_header("cache-control", "max-age=31536000")
-            .ok()
     }
 }
 

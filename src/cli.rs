@@ -9,7 +9,7 @@ use snafu::ResultExt;
 
 use crate::{
     command, config, error,
-    log::{error, warning},
+    log::{debug, error, warning},
 };
 
 #[derive(Parser)]
@@ -81,14 +81,16 @@ async fn run_internal() -> crate::Result<()> {
             dirs::home_dir().unwrap_or_default().join(".bowerbird")
         }
         .join("config.json");
-        let config = config::Config::from_file(config_path)?;
+        let config = config::Config::from_file(&config_path)?;
+        config.set_log_level();
+
+        debug!("Config loaded: {:?}", config_path);
 
         Ok(config)
     };
 
     let pre_fn = async {
         let config = config_builder()?;
-        config.set_log_level();
         let db_client = mongodb::Client::with_options(
             mongodb::options::ClientOptions::parse(&config.mongodb.uri)
                 .await
@@ -96,11 +98,16 @@ async fn run_internal() -> crate::Result<()> {
         )
         .context(error::MongoDB)?;
 
+        debug!("Connected to MongoDB: {}", config.mongodb.uri);
+
         let ffmpeg_path = if config.ffmpeg_path.is_empty() {
             PathBuf::from("ffmpeg")
         } else {
             PathBuf::from(&config.ffmpeg_path)
         };
+
+        debug!("FFmpeg path: {:?}", ffmpeg_path);
+
         let mut ffmpeg = Command::new(&ffmpeg_path);
         ffmpeg.args(["-hide_banner", "-loglevel", "error"]);
         let ffmpeg_exists = ffmpeg.spawn().is_ok();
@@ -139,9 +146,11 @@ async fn run_internal() -> crate::Result<()> {
                 command::pixiv::database::create_indexes(&db).await?;
                 let mut api_client = reqwest::ClientBuilder::new();
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
+                    debug!("pixiv api proxy set");
                     api_client = api_client.proxy(proxy);
                 }
                 if let Ok(_) = std::env::var("BOWERBIRD_ACCEPT_INVALID_CERTS") {
+                    warning!("Will ignore certs for pixiv api requests");
                     api_client = api_client.danger_accept_invalid_certs(true);
                 }
                 let api = pixivcrab::AppAPI::new(
@@ -151,6 +160,7 @@ async fn run_internal() -> crate::Result<()> {
                 )
                 .context(error::PixivAPI)?;
                 let auth_result = api.auth().await.context(error::PixivAPI)?;
+                debug!("pixiv authed: {:?}", auth_result);
                 config.pixiv.refresh_token = auth_result.refresh_token;
                 config.save()?;
                 let selected_user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());

@@ -1,5 +1,3 @@
-#![feature(map_first_last)]
-// #![feature(drain_filter)]
 pub mod cli;
 mod command;
 mod config;

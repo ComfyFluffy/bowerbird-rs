@@ -1,7 +1,9 @@
 use std::{
+    fmt::Debug,
     fs::File,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 
 use image::GenericImageView;
@@ -11,7 +13,7 @@ use snafu::ResultExt;
 
 use crate::{
     error::{self, BoxError},
-    log::warning,
+    log::{debug, warning},
     model,
 };
 
@@ -98,11 +100,12 @@ pub async fn retry_pager<'a, T>(
     max_tries: i32,
 ) -> crate::Result<Option<T>>
 where
-    T: DeserializeOwned + pixivcrab::NextUrl,
+    T: DeserializeOwned + pixivcrab::NextUrl + Debug,
 {
     let mut tries = 0;
     loop {
         tries += 1;
+        debug!("Executing pager {:?}", pager);
         match pager.next().await.context(error::PixivAPI) {
             Ok(r) => {
                 return Ok(r);
@@ -111,8 +114,8 @@ where
                 if let error::Error::PixivAPI { source, .. } = &e {
                     if let pixivcrab::error::Error::HTTP { .. } = source {
                         if tries <= max_tries {
-                            warning!("{}", e);
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            warning!("retrying on pixiv api error: {:?} :{}", pager, e);
+                            tokio::time::sleep(Duration::from_secs(2)).await;
                             continue;
                         }
                     }
