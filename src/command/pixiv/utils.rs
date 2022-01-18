@@ -8,7 +8,7 @@ use std::{
 
 use image::GenericImageView;
 use pixivcrab::Pager;
-use rocket::serde::DeserializeOwned;
+use serde::de::DeserializeOwned;
 use snafu::ResultExt;
 
 use crate::{

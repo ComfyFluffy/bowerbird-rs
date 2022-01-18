@@ -46,10 +46,6 @@ pub enum Error {
     BsonSerialize {
         source: mongodb::bson::ser::Error,
     },
-    #[snafu(display("server error: {}", source))]
-    Rocket {
-        source: rocket::Error,
-    },
     #[snafu(display("aria2 error: {}", source))]
     Aria2 {
         source: aria2_ws::Error,
