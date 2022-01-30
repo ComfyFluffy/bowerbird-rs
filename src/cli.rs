@@ -130,7 +130,9 @@ async fn run_internal() -> crate::Result<()> {
 
     match &opts.subcommand {
         SubcommandMain::Migrate => {}
-        SubcommandMain::Serve => {}
+        SubcommandMain::Serve => {
+            // crate::server::run().await;
+        }
         SubcommandMain::Init => {
             config_builder()?;
         }

@@ -5,7 +5,7 @@ mod downloader;
 mod error;
 mod log;
 pub mod model;
-mod server;
+// mod server;
 mod utils;
 pub(crate) type Result<T> = std::result::Result<T, error::Error>;
 pub use error::Error;

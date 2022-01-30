@@ -32,3 +32,10 @@ url = "2"
 mime_guess = "2"
 path-slash = "0.1.4"
 zip = "0.5"
+dav-server = { version = "0.3" }
+hyper = { version = "*", features = ["server"] }
+nanoid = "0.4"
+rbatis = { version = "3", default-features = false, features = [
+    "mysql",
+    "runtime-tokio-rustls",
+] }

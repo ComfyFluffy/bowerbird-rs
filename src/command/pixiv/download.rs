@@ -96,7 +96,8 @@ async fn on_success_illust(
     Ok(())
 }
 
-fn task_from_illust(
+async fn download_illust(
+    downloader: &Aria2Downloader,
     c_image: Collection<Document>,
     url: Option<String>,
     user_id: &str,
@@ -104,7 +105,7 @@ fn task_from_illust(
     is_multi_page: bool,
     ugoira_frame_delay: Option<Vec<i32>>,
     task_config: &TaskConfig,
-) -> crate::Result<Option<Task>> {
+) -> crate::Result<()> {
     let url = url.ok_or(
         error::PixivParse {
             message: "empty url".to_string(),
@@ -143,7 +144,11 @@ fn task_from_illust(
         .join(PathBuf::from_slash(&path_slash));
 
     if path.exists() {
-        return Ok(None);
+        let mut aria2_path = path.clone().into_os_string();
+        aria2_path.push(".aria2");
+        if !PathBuf::from(aria2_path).exists() {
+            return Ok(());
+        }
     }
 
     let on_success_hook = if let Some(ugoira_frame_delay) = ugoira_frame_delay {
@@ -152,16 +157,16 @@ fn task_from_illust(
             url.clone(),
             path.clone(),
             c_image,
-            path_slash,
+            path_slash.clone(),
             ugoira_frame_delay,
             task_config.ffmpeg_path.clone(),
         )
         .boxed()
     } else {
-        on_success_illust(url.clone(), path.clone(), c_image, path_slash).boxed()
+        on_success_illust(url.clone(), path.clone(), c_image, path_slash.clone()).boxed()
     };
 
-    Ok(Some(Task {
+    let task = Task {
         hooks: Some(TaskHooks {
             on_success: Some(on_success_hook),
             ..Default::default()
@@ -169,11 +174,13 @@ fn task_from_illust(
         options: Some(TaskOptions {
             header: Some(vec!["Referer: https://app-api.pixiv.net/".to_string()]),
             all_proxy: task_config.proxy.clone(),
-            out: Some(path.to_string_lossy().to_string()),
+            out: Some(path_slash),
+            dir: Some(task_config.parent_dir.to_string_lossy().to_string()),
             ..Default::default()
         }),
         url,
-    }))
+    };
+    downloader.add_task(task).await
 }
 
 pub async fn download_illusts(
@@ -185,7 +192,6 @@ pub async fn download_illusts(
     limit: Option<u32>,
     task_config: &TaskConfig,
 ) -> crate::Result<()> {
-    let mut tasks = Vec::new();
     for i in illusts {
         if super::limit_reached(limit, *items_sent) {
             break;
@@ -201,7 +207,8 @@ pub async fn download_illusts(
         if is_ugoira {
             if let Some((zip_url, delay)) = ugoira_map.remove(&illust_id) {
                 let zip_url = zip_url.replace("600x600", "1920x1080");
-                match task_from_illust(
+                if let Err(err) = download_illust(
+                    downloader,
                     c_image.clone(),
                     // get higher resolution images
                     Some(zip_url.clone()),
@@ -210,47 +217,45 @@ pub async fn download_illusts(
                     true,
                     Some(delay),
                     task_config,
-                ) {
-                    Ok(task) => {
-                        if let Some(task) = task {
-                            tasks.push(task);
-                        }
-                    }
-                    Err(err) => {
-                        warning!("Fail to build task from {}: {}", zip_url, err)
-                    }
+                )
+                .await
+                {
+                    warning!("Fail to build task from {}: {}", zip_url, err);
                 }
             }
         }
 
         if i.page_count == 1 {
-            if let Some(task) = try_skip!(task_from_illust(
-                c_image.clone(),
-                i.meta_single_page.original_image_url.clone(),
-                &i.user.id.to_string(),
-                &illust_id,
-                is_ugoira,
-                None,
-                task_config
-            )) {
-                tasks.push(task);
-            }
-        } else {
-            for img in &i.meta_pages {
-                if let Some(task) = try_skip!(task_from_illust(
+            try_skip!(
+                download_illust(
+                    downloader,
                     c_image.clone(),
-                    img.image_urls.original.clone(),
+                    i.meta_single_page.original_image_url.clone(),
                     &i.user.id.to_string(),
                     &illust_id,
-                    true,
+                    is_ugoira,
                     None,
                     task_config
-                )) {
-                    tasks.push(task);
-                }
+                )
+                .await
+            );
+        } else {
+            for img in &i.meta_pages {
+                try_skip!(
+                    download_illust(
+                        downloader,
+                        c_image.clone(),
+                        img.image_urls.original.clone(),
+                        &i.user.id.to_string(),
+                        &illust_id,
+                        true,
+                        None,
+                        task_config
+                    )
+                    .await
+                );
             }
         }
     }
-    downloader.add_tasks(tasks).await?;
     Ok(())
 }

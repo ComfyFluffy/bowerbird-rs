@@ -3,7 +3,7 @@ pub mod pixiv;
 use mongodb::bson::{oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Item<E, H> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _id: Option<ObjectId>,
@@ -22,6 +22,9 @@ pub struct Item<E, H> {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<E>,
+
+    #[serde(skip_serializing, flatten)]
+    pub other_fields: bson::Document,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -33,7 +36,7 @@ pub struct History<H> {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct LocalMedia<T> {
+pub struct LocalMedia<E> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _id: Option<ObjectId>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,17 +46,17 @@ pub struct LocalMedia<T> {
     pub mime: Option<String>,
     pub local_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extension: Option<T>,
+    pub extension: Option<E>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RGB(pub i16, pub i16, pub i16);
+pub struct Rgb(pub i16, pub i16, pub i16);
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ImageMedia {
     pub width: i32,
     pub height: i32,
-    pub palette_rgb: Vec<RGB>,
+    pub palette_rgb: Vec<Rgb>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]

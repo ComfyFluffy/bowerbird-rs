@@ -13,7 +13,7 @@ use crate::{
     log::{info, warning},
     model::{
         pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
-        History, ImageMedia, LocalMedia, RGB,
+        History, ImageMedia, LocalMedia, Rgb,
     },
 };
 
@@ -86,7 +86,7 @@ async fn update_tags(
 ) -> crate::Result<HashMap<String, ObjectId>> {
     let mut tags_to_oid = HashMap::new();
     for alias in tags_set {
-        let regs: Vec<bson::Regex> = alias
+        let regs: Vec<_> = alias
             .iter()
             .map(|a| bson::Regex {
                 pattern: format!("^{}$", regex::escape(a)),
@@ -133,7 +133,7 @@ fn insert_tags_to_alias(tags: &Vec<pixivcrab::models::Tag>, tags_set: &mut HashS
 }
 
 async fn set_item_invisible(c_item: &Collection<Document>, source_id: &str) -> crate::Result<()> {
-    warning!("Pixiv: Works {} is invisible!", source_id);
+    warning!("pixiv: Works {} is invisible!", source_id);
     c_item
         .update_one(
             doc! {
@@ -170,7 +170,7 @@ async fn update_user_detail(
     user_id: &str,
     c_user: &Collection<Document>,
 ) -> crate::Result<()> {
-    info!("Pixiv database: Updating user {}", &user_id);
+    info!("pixiv database: Updating user {}", &user_id);
     let resp = api.user_detail(&user_id).await.context(error::PixivAPI)?;
     let user = PixivUser {
         last_modified: Some(DateTime::now()),
@@ -262,7 +262,7 @@ pub async fn save_image(
     c_image: &Collection<Document>,
     size: i64,
     (w, h): (i32, i32),
-    palette_rgb: Vec<RGB>,
+    palette_rgb: Vec<Rgb>,
     url: String,
     image_path_db: String,
     image_path: impl AsRef<Path>,
@@ -440,7 +440,7 @@ pub async fn save_illusts(
                 .ugoira_metadata(&illust_id)
                 .await
                 .context(error::PixivAPI)?;
-            let delay: Vec<i32> = ugoira
+            let delay: Vec<_> = ugoira
                 .ugoira_metadata
                 .frames
                 .iter()
@@ -542,7 +542,7 @@ pub async fn save_novels(
             continue;
         }
 
-        info!("Pixiv: Getting novel text of {}", &novel_id);
+        info!("pixiv: Getting novel text of {}", &novel_id);
         let r = api.novel_text(&novel_id).await.context(error::PixivAPI)?;
 
         let history = History {
@@ -582,7 +582,7 @@ pub async fn create_indexes(db: &Database) -> crate::Result<()> {
     let c_tag = db.collection::<Document>("pixiv_tag");
     let c_user = db.collection::<Document>("pixiv_user");
 
-    let item_indexes: Vec<IndexModel> = ["source_id", "tag_ids", "parent_id"]
+    let item_indexes: Vec<_> = ["source_id", "tag_ids", "parent_id"]
         .into_iter()
         .map(|k| IndexModel::builder().keys(doc! { k: 1 }).build())
         .collect();

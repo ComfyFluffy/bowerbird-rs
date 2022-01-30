@@ -81,7 +81,7 @@ pub fn ugoira_to_mp4(
 
 pub fn get_palette(
     image_path: impl AsRef<Path>,
-) -> Result<((i32, i32), Vec<model::RGB>), BoxError> {
+) -> Result<((i32, i32), Vec<model::Rgb>), BoxError> {
     let img = image::open(image_path)?;
     let (w, h) = img.dimensions();
     let thumbnail = img.thumbnail(512, 512).to_rgba8();
@@ -89,7 +89,7 @@ pub fn get_palette(
 
     let rgb_v = color_thief::get_palette(thumbnail.as_raw(), color_thief::ColorFormat::Rgba, 5, 5)?
         .into_iter()
-        .map(|c| model::RGB(c.r.into(), c.g.into(), c.b.into()))
+        .map(|c| model::Rgb(c.r.into(), c.g.into(), c.b.into()))
         .collect();
     // Convert to i32 here to save to bson.
     Ok(((w as i32, h as i32), rgb_v))

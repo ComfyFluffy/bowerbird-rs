@@ -11,7 +11,7 @@ A toolset for saving and organizing illustrations.
 - [ ] Daemon with CLI interface
 - [ ] Progress bar like aria2
 
-### Pixiv
+### pixiv
 
 - [x] Download illustrations (Bookmarked and uploaded)
 - [x] Save illustrations and novels to database

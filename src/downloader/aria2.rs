@@ -32,7 +32,13 @@ impl Drop for Aria2Downloader {
 impl Aria2Downloader {
     pub async fn new(aria2_path: &str) -> crate::Result<Self> {
         let token = "bowerbird";
-        let port = get_available_port(50311..50400).unwrap();
+        let ra = 30311..30400;
+        let port = get_available_port(ra.clone()).ok_or(
+            error::NoAvaliablePort {
+                message: format!("{:?}", ra),
+            }
+            .build(),
+        )?;
         let mut child = Command::new(aria2_path)
             .args(&[
                 "--no-conf",
@@ -92,15 +98,9 @@ impl Aria2Downloader {
         Ok(())
     }
 
-    pub async fn add_tasks(&self, tasks: Vec<Task>) -> crate::Result<()> {
-        for t in tasks {
-            self.add_task(t).await?;
-        }
-        Ok(())
-    }
-
     pub async fn wait_shutdown(self) {
         self.waitgroup.clone().await;
         let _ = self.client.force_shutdown().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
