@@ -35,7 +35,3 @@ zip = "0.5"
 dav-server = { version = "0.3" }
 hyper = { version = "*", features = ["server"] }
 nanoid = "0.4"
-rbatis = { version = "3", default-features = false, features = [
-    "mysql",
-    "runtime-tokio-rustls",
-] }
