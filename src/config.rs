@@ -98,9 +98,9 @@ impl Config {
             defaults.save()?;
             Ok(defaults)
         } else {
-            let file = File::open(&path).context(error::ConfigIO)?;
+            let file = File::open(&path).context(error::ConfigIo)?;
             let mut config_loaded: Config =
-                serde_json::from_reader(file).context(error::ConfigJSON)?;
+                serde_json::from_reader(file).context(error::ConfigJson)?;
             config_loaded.config_path = Some(PathBuf::from(path.as_ref()));
             config_loaded.save()?;
             Ok(config_loaded)
@@ -113,15 +113,15 @@ impl Config {
             .as_ref()
             .ok_or(error::ConfigPathNotSet.build())?;
         if let Some(p) = path.parent() {
-            std::fs::create_dir_all(p).context(error::ConfigIO)?;
+            std::fs::create_dir_all(p).context(error::ConfigIo)?;
         }
         let file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(path)
-            .context(error::ConfigIO)?;
-        serde_json::to_writer_pretty(file, &self).context(error::ConfigJSON)
+            .context(error::ConfigIo)?;
+        serde_json::to_writer_pretty(file, &self).context(error::ConfigJson)
     }
 
     pub fn sub_dir(&self, dir: impl AsRef<Path>) -> PathBuf {

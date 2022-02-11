@@ -106,12 +106,12 @@ where
     loop {
         tries += 1;
         debug!("Executing pager {:?}", pager);
-        match pager.next().await.context(error::PixivAPI) {
+        match pager.next().await.context(error::PixivApi) {
             Ok(r) => {
                 return Ok(r);
             }
             Err(e) => {
-                if let error::Error::PixivAPI { source, .. } = &e {
+                if let error::Error::PixivApi { source, .. } = &e {
                     if let pixivcrab::error::Error::HTTP { .. } = source {
                         if tries <= max_tries {
                             warning!("retrying on pixiv api error: {:?} :{}", pager, e);

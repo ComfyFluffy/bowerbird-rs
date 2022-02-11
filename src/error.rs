@@ -8,11 +8,11 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[snafu(context(suffix(false)))]
 pub enum Error {
     #[snafu(display("json error in config file: {source}"))]
-    ConfigJSON {
+    ConfigJson {
         source: serde_json::Error,
     },
     #[snafu(display("io error with config file: {source}"))]
-    ConfigIO {
+    ConfigIo {
         source: std::io::Error,
     },
     #[snafu(display("try to save config without path"))]
@@ -22,7 +22,7 @@ pub enum Error {
         source: reqwest::Error,
     },
     #[snafu(display("pixiv api error: {source}"))]
-    PixivAPI {
+    PixivApi {
         source: pixivcrab::error::Error,
     },
     #[snafu(display("cannot parse infomation from pixiv: {message}"))]
@@ -33,7 +33,7 @@ pub enum Error {
         source: url::ParseError,
     },
     #[snafu(display("error on mongodb: {source}"))]
-    MongoDB {
+    MongoDb {
         source: mongodb::error::Error,
     },
     #[snafu(display("cannot parse result from mongodb: {source}"))]
@@ -51,12 +51,16 @@ pub enum Error {
         source: aria2_ws::Error,
     },
     #[snafu(display("aria2 startup error: {source}"))]
-    Aria2StartUpIO {
+    Aria2StartUpIo {
         source: std::io::Error,
     },
     #[snafu(display("aria2 startup error with code: {status}"))]
     Aria2StartUpExit {
         status: ExitStatus,
+    },
+    #[snafu(display("aria2 exit error: {source}"))]
+    Aria2ExitIo {
+        source: std::io::Error,
     },
     #[snafu(display("fail to find avalible port: {message}"))]
     NoAvaliablePort {

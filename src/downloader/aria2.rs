@@ -50,11 +50,11 @@ impl Aria2Downloader {
                 token,
             ])
             .spawn()
-            .context(error::Aria2StartUpIO)?;
+            .context(error::Aria2StartUpIo)?;
         match timeout(Duration::from_millis(100), child.wait()).await {
             Ok(r) => {
                 return error::Aria2StartUpExit {
-                    status: r.context(error::Aria2StartUpIO)?,
+                    status: r.context(error::Aria2StartUpIo)?,
                 }
                 .fail();
             } // aria2 exited unexpectedly

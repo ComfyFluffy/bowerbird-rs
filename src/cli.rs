@@ -94,9 +94,9 @@ async fn run_internal() -> crate::Result<()> {
         let db_client = mongodb::Client::with_options(
             mongodb::options::ClientOptions::parse(&config.mongodb.uri)
                 .await
-                .context(error::MongoDB)?,
+                .context(error::MongoDb)?,
         )
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
 
         debug!("Connected to MongoDB: {}", config.mongodb.uri);
 
@@ -131,7 +131,7 @@ async fn run_internal() -> crate::Result<()> {
     match &opts.subcommand {
         SubcommandMain::Migrate => {}
         SubcommandMain::Serve => {
-            // crate::server::run().await;
+            crate::server::run().await;
         }
         SubcommandMain::Init => {
             config_builder()?;
@@ -157,8 +157,8 @@ async fn run_internal() -> crate::Result<()> {
                     &config.pixiv.language,
                     api_client,
                 )
-                .context(error::PixivAPI)?;
-                let auth_result = api.auth().await.context(error::PixivAPI)?;
+                .context(error::PixivApi)?;
+                let auth_result = api.auth().await.context(error::PixivApi)?;
                 debug!("pixiv authed: {:?}", auth_result);
                 config.pixiv.refresh_token = auth_result.refresh_token;
                 config.save()?;

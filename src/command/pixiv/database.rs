@@ -49,7 +49,7 @@ async fn update_users(
                     .build(),
             )
             .await
-            .context(error::MongoDB)?
+            .context(error::MongoDb)?
             .ok_or(error::MongoNotMatch.build())?;
         let parent_id = r.get_object_id("_id").context(error::MongoValueAccess)?;
         users_to_oid.insert(user_id.clone(), parent_id);
@@ -104,7 +104,7 @@ async fn update_tags(
                     .build(),
             )
             .await
-            .context(error::MongoDB)?
+            .context(error::MongoDb)?
             .ok_or(error::MongoNotMatch.build())?;
         for t in alias {
             let oid = r.get_object_id("_id").context(error::MongoValueAccess)?;
@@ -145,7 +145,7 @@ async fn set_item_invisible(c_item: &Collection<Document>, source_id: &str) -> c
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
     Ok(())
 }
 
@@ -171,7 +171,7 @@ async fn update_user_detail(
     c_user: &Collection<Document>,
 ) -> crate::Result<()> {
     info!("pixiv database: Updating user {}", &user_id);
-    let resp = api.user_detail(&user_id).await.context(error::PixivAPI)?;
+    let resp = api.user_detail(&user_id).await.context(error::PixivApi)?;
     let user = PixivUser {
         last_modified: Some(DateTime::now()),
         extension: Some(pixiv::User {
@@ -193,7 +193,7 @@ async fn update_user_detail(
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
 
     fn none_if_empty(s: String) -> Option<String> {
         match s.as_str() {
@@ -254,7 +254,7 @@ async fn update_user_detail(
             None,
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
     Ok(())
 }
 
@@ -287,7 +287,7 @@ pub async fn save_image(
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
     Ok(())
 }
 
@@ -315,7 +315,7 @@ pub async fn save_image_ugoira(
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
 
     if with_mp4 {
         let mut zip_path_db_slash = PathBuf::from_slash(zip_path_db);
@@ -341,7 +341,7 @@ pub async fn save_image_ugoira(
             UpdateOptions::builder().upsert(true).build(),
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
     }
     Ok(())
 }
@@ -408,7 +408,7 @@ pub async fn save_illusts(
                 UpdateOptions::builder().upsert(true).build(),
             )
             .await
-            .context(error::MongoDB)?;
+            .context(error::MongoDb)?;
 
         let mut history = History {
             last_modified: Some(DateTime::now()),
@@ -439,7 +439,7 @@ pub async fn save_illusts(
             let ugoira = api
                 .ugoira_metadata(&illust_id)
                 .await
-                .context(error::PixivAPI)?;
+                .context(error::PixivApi)?;
             let delay: Vec<_> = ugoira
                 .ugoira_metadata
                 .frames
@@ -465,7 +465,7 @@ pub async fn save_illusts(
                     None,
                 )
                 .await
-                .context(error::MongoDB)?;
+                .context(error::MongoDb)?;
     }
     Ok(())
 }
@@ -536,14 +536,14 @@ pub async fn save_novels(
                 UpdateOptions::builder().upsert(true).build(),
             )
             .await
-            .context(error::MongoDB)?
+            .context(error::MongoDb)?
             .matched_count;
         if matched_count != 0 && !update_exists {
             continue;
         }
 
         info!("pixiv: Getting novel text of {}", &novel_id);
-        let r = api.novel_text(&novel_id).await.context(error::PixivAPI)?;
+        let r = api.novel_text(&novel_id).await.context(error::PixivApi)?;
 
         let history = History {
             extension: Some(NovelHistory {
@@ -569,7 +569,7 @@ pub async fn save_novels(
                     None,
                 )
                 .await
-                .context(error::MongoDB)?;
+                .context(error::MongoDb)?;
     }
 
     Ok(())
@@ -590,18 +590,18 @@ pub async fn create_indexes(db: &Database) -> crate::Result<()> {
     for c in [c_illust, c_novel] {
         c.create_indexes(item_indexes.clone(), None)
             .await
-            .context(error::MongoDB)?;
+            .context(error::MongoDb)?;
     }
 
     c_user
         .create_indexes(item_indexes[..2].to_vec(), None)
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
 
     c_image
         .create_index(IndexModel::builder().keys(doc! { "url": 1 }).build(), None)
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
 
     c_tag
         .create_index(
@@ -609,7 +609,7 @@ pub async fn create_indexes(db: &Database) -> crate::Result<()> {
             None,
         )
         .await
-        .context(error::MongoDB)?;
+        .context(error::MongoDb)?;
 
     Ok(())
 }
