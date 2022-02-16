@@ -1,28 +1,59 @@
-use std::convert::Infallible;
+mod error;
+mod pixiv;
+mod utils;
+type Result<T> = std::result::Result<T, error::Error>;
 
-use dav_server::{memls::MemLs, DavHandler, memfs::MemFs};
+use std::{path::PathBuf, sync::Mutex};
 
-mod fs;
-mod query;
+use actix_files::Files;
+use actix_web::{
+    web::{self, Data},
+    App, HttpServer,
+};
+use mongodb::Database;
+use snafu::ResultExt;
+use tokio::sync::Semaphore;
 
-pub async fn run() {
-    let dav_server = DavHandler::builder()
-        .filesystem(MemFs::new())
-        .locksystem(MemLs::new())
-        .build_handler();
+use crate::config::Config;
 
-    let make_service = hyper::service::make_service_fn(move |_| {
-        let dav_server = dav_server.clone();
-        async move {
-            let func = move |req| {
-                let dav_server = dav_server.clone();
-                async move { Ok::<_, Infallible>(dav_server.handle(req).await) }
-            };
-            Ok::<_, Infallible>(hyper::service::service_fn(func))
-        }
+use utils::ThumbnailCache;
+
+#[derive(Debug, Clone)]
+struct PixivConfig {
+    storage_dir: PathBuf,
+}
+
+pub async fn run(db: Database, config: Config) -> crate::Result<()> {
+    std::env::set_var("RUST_LOG", "debug");
+    std::env::set_var("RUST_BACKTRACE", "1");
+    env_logger::init();
+    log::info!("Starting server");
+
+    let thumbnail_cache = Data::new(Mutex::new(ThumbnailCache::new()));
+    let pixiv_config = Data::new(PixivConfig {
+        storage_dir: config.sub_dir(&config.pixiv.storage_dir),
     });
-    hyper::Server::bind(&([127, 0, 0, 1], 4918).into())
-        .serve(make_service)
-        .await
-        .unwrap();
+    let db = Data::new(db);
+
+    let cpu_workers_sem = Data::new(Semaphore::new(num_cpus::get()));
+    HttpServer::new(move || {
+        let scope_pixiv = web::scope("/pixiv")
+            .service(pixiv::thumbnail)
+            .service(pixiv::media_by_id)
+            .service(Files::new("/storage", pixiv_config.storage_dir.clone()));
+
+        let scope_v1 = web::scope("/api/v1").service(scope_pixiv);
+
+        App::new()
+            .app_data(db.clone())
+            .app_data(thumbnail_cache.clone())
+            .app_data(pixiv_config.clone())
+            .app_data(cpu_workers_sem.clone())
+            .service(scope_v1)
+    })
+    .bind(("127.0.0.1", 5000))
+    .context(crate::error::ServerIo)?
+    .run()
+    .await
+    .context(crate::error::ServerIo)
 }

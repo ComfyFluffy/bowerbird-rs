@@ -115,28 +115,19 @@ async fn download_illust(
 
     let captures = RE_ILLUST_URL.captures(&url).ok_or(
         error::PixivParse {
-            message: format!("cannot match url with RE_ILLUST_URL: {}", url),
+            message: format!("cannot match url with RE_ILLUST_URL: {url}"),
         }
         .build(),
     )?;
     let date = captures.get(1).unwrap().as_str().replace("/", "");
 
     let path_slash = if is_multi_page {
-        format!(
-            "{}/{}_{}/{}",
-            user_id,
-            illust_id,
-            date,
-            captures.get(2).unwrap().as_str()
-        )
+        let filename = captures.get(2).unwrap().as_str();
+        format!("{user_id}/{illust_id}_{date}/{filename}")
     } else {
-        format!(
-            "{}/{}_{}.{}",
-            user_id,
-            captures.get(3).unwrap().as_str(), // filename with page id
-            date,
-            captures.get(4).unwrap().as_str(), // extension
-        )
+        let id_page = captures.get(3).unwrap().as_str();
+        let ext = captures.get(4).unwrap().as_str();
+        format!("{user_id}/{id_page}_{date}.{ext}")
     };
 
     let path = task_config

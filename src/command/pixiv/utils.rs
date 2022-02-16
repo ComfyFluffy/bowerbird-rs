@@ -60,10 +60,10 @@ pub fn ugoira_to_mp4(
     let mut t: f32 = 0.0;
     let mut frame = 0;
     for i in 0..zip_file.len() {
-        t += *frame_delay.get(i).ok_or(format!(
-            "Cannot get ugoira frame {} from {:?}",
-            i, frame_delay
-        ))? as f32;
+        t += *frame_delay
+            .get(i)
+            .ok_or(format!("Cannot get ugoira frame {i} from {frame_delay:?}"))?
+            as f32;
         let next_frame = (t / (1000.0 / 60.0)).round() as i32;
         for _ in frame..next_frame {
             let mut file = zip_file.by_index(i)?;
@@ -74,7 +74,7 @@ pub fn ugoira_to_mp4(
     drop(stdin);
     let status = ffmpeg.wait()?;
     if !status.success() {
-        Err(format!("FFmpeg exited with status {}", status))?
+        Err(format!("FFmpeg exited with status {status}"))?
     }
     Ok(mp4_path)
 }

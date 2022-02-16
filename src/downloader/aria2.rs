@@ -60,7 +60,7 @@ impl Aria2Downloader {
             } // aria2 exited unexpectedly
             Err(_) => {} // aria2 continues to run
         };
-        let client = Client::connect(&format!("ws://127.0.0.1:{}/jsonrpc", port), Some(token))
+        let client = Client::connect(&format!("ws://127.0.0.1:{port}/jsonrpc"), Some(token))
             .await
             .context(error::Aria2)?;
         Ok(Self {

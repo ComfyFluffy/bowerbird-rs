@@ -12,7 +12,7 @@ where
         match TcpListener::bind(("127.0.0.1", p)) {
             Ok(_) => return Some(p),
             Err(e) => {
-                println!("{}", e)
+                eprintln!("{}", e)
             }
         }
     }

@@ -66,4 +66,7 @@ pub enum Error {
     NoAvaliablePort {
         message: String,
     },
+    ServerIo {
+        source: std::io::Error,
+    },
 }
