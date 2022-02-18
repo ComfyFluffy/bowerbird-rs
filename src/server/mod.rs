@@ -27,7 +27,6 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     std::env::set_var("RUST_BACKTRACE", "1");
     env_logger::init();
-    log::info!("Starting server");
 
     let thumbnail_cache = Data::new(Mutex::new(ThumbnailCache::new()));
     let pixiv_config = Data::new(PixivConfig {
@@ -38,9 +37,10 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
     let cpu_workers_sem = Data::new(Semaphore::new(num_cpus::get()));
     HttpServer::new(move || {
         let scope_pixiv = web::scope("/pixiv")
+            .service(Files::new("/storage", pixiv_config.storage_dir.clone()))
             .service(pixiv::thumbnail)
             .service(pixiv::media_by_id)
-            .service(Files::new("/storage", pixiv_config.storage_dir.clone()));
+            .service(pixiv::find_image_media);
 
         let scope_v1 = web::scope("/api/v1").service(scope_pixiv);
 

@@ -14,7 +14,8 @@ use snafu::ResultExt;
 use crate::{
     error::{self, BoxError},
     log::{debug, warning},
-    model,
+    model::Hsv,
+    utils::rgb_to_hsv,
 };
 
 pub fn ugoira_to_mp4(
@@ -79,20 +80,21 @@ pub fn ugoira_to_mp4(
     Ok(mp4_path)
 }
 
-pub fn get_palette(
-    image_path: impl AsRef<Path>,
-) -> Result<((i32, i32), Vec<model::Rgb>), BoxError> {
+pub fn get_palette(image_path: impl AsRef<Path>) -> Result<((i32, i32), Vec<Hsv>), BoxError> {
     let img = image::open(image_path)?;
     let (w, h) = img.dimensions();
     let thumbnail = img.thumbnail(512, 512).to_rgba8();
     drop(img);
 
-    let rgb_v = color_thief::get_palette(thumbnail.as_raw(), color_thief::ColorFormat::Rgba, 5, 5)?
+    let hsv_v = color_thief::get_palette(thumbnail.as_raw(), color_thief::ColorFormat::Rgba, 5, 5)?
         .into_iter()
-        .map(|c| model::Rgb(c.r.into(), c.g.into(), c.b.into()))
+        .map(|c| {
+            let (h, s, v) = rgb_to_hsv(c.r, c.g, c.b);
+            Hsv { h, s, v }
+        })
         .collect();
     // Convert to i32 here to save to bson.
-    Ok(((w as i32, h as i32), rgb_v))
+    Ok(((w as i32, h as i32), hsv_v))
 }
 
 pub async fn retry_pager<'a, T>(

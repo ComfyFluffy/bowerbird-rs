@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use aria2_ws::Client;
-use futures::{future::BoxFuture, FutureExt};
+use futures::{Future, FutureExt};
 pub use reqwest::header::HeaderMap;
 use snafu::ResultExt;
 use tokio::{
@@ -70,7 +70,7 @@ impl Aria2Downloader {
         })
     }
 
-    fn map_hook(&self, hook: Option<super::BoxFutureResult>) -> BoxFuture<'static, ()> {
+    fn map_hook(&self, hook: Option<super::BoxFutureResult>) -> impl Future<Output = ()> {
         let waitgroup = self.waitgroup.clone();
         if let Some(hook) = hook {
             async move {
@@ -87,8 +87,8 @@ impl Aria2Downloader {
 
     pub async fn add_task(&self, task: Task) -> crate::Result<()> {
         let hooks = task.hooks.map(|hooks| aria2_ws::TaskHooks {
-            on_complete: Some(self.map_hook(hooks.on_success)),
-            on_error: Some(self.map_hook(hooks.on_error)),
+            on_complete: Some(self.map_hook(hooks.on_success).boxed()),
+            on_error: Some(self.map_hook(hooks.on_error).boxed()),
         });
         self.client
             .add_uri(vec![task.url], task.options, None, hooks)

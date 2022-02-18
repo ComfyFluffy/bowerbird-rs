@@ -1,5 +1,6 @@
 use std::{str::FromStr, sync::Mutex};
 
+use futures::TryStreamExt;
 use mongodb::{options::FindOneOptions, Database};
 use serde::Deserialize;
 
@@ -9,11 +10,14 @@ use actix_web::{
         header::{self, CacheDirective, ContentType},
         StatusCode,
     },
-    web::{self, Data},
+    post,
+    web::{self, Data, Json},
     HttpRequest, HttpResponse,
 };
-use bson::{doc, Document};
+use bson::{doc, from_document, oid::ObjectId, Document};
 use tokio::sync::Semaphore;
+
+use crate::model::{ImageMedia, LocalMedia};
 
 use super::utils;
 
@@ -35,6 +39,9 @@ async fn thumbnail(
     if req.headers().get(header::RANGE).is_some() {
         return Ok(HttpResponse::NotImplemented().finish());
     }
+    if query.size > 1024 {
+        return Err(Error::with_msg(StatusCode::BAD_REQUEST, "size too large"));
+    }
     let path = config
         .storage_dir
         .join(path.0.replace("../", "").replace("..\\", ""));
@@ -50,13 +57,13 @@ async fn thumbnail(
 
 async fn media_redirect(
     db: &Database,
-    find_by: Document,
+    filter: Document,
     size: Option<u32>,
 ) -> Result<HttpResponse> {
     if let Some(r) = db
         .collection::<Document>("pixiv_image")
         .find_one(
-            find_by,
+            filter,
             FindOneOptions::builder()
                 .projection(doc! {"local_path": true})
                 .build(),
@@ -70,14 +77,11 @@ async fn media_redirect(
         } else {
             format!("storage/{path}")
         };
-        Ok(HttpResponse::TemporaryRedirect()
+        Ok(HttpResponse::Found()
             .append_header((header::LOCATION, url))
             .finish())
     } else {
-        Err(Error::with_msg(
-            StatusCode::NOT_FOUND,
-            "not found in database",
-        ))
+        Err(Error::not_found())
     }
 }
 
@@ -109,4 +113,61 @@ async fn media_by_url(
     db: Data<Database>,
 ) -> Result<HttpResponse> {
     media_redirect(db.as_ref(), doc! { "url": &query.url }, query.size).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FindImageMediaForm {
+    h_range: Option<(f32, f32)>,
+    min_s: Option<f32>,
+    min_v: Option<f32>,
+    limit: Option<u32>,
+}
+#[post("/find/media/image")]
+async fn find_image_media(
+    db: Data<Database>,
+    form: Json<FindImageMediaForm>,
+) -> Result<Json<Vec<String>>> {
+    #[derive(Debug, Clone, Deserialize)]
+    struct AggreateResult {
+        _ids: Vec<ObjectId>,
+    }
+    let mut m = Document::new();
+
+    if let Some(h_range) = form.h_range {
+        let h = if h_range.0 > h_range.1 {
+            doc! { "$or": [
+                { "extension.palette_hsv.0.h": {"$gte": h_range.0, "$lte": 360.0} },
+                { "extension.palette_hsv.0.h": {"$gte": 0.0, "$lte": h_range.1} },
+            ]}
+        } else {
+            doc! { "extension.palette_hsv.0.h": {"$gte": h_range.0, "$lte": h_range.1} }
+        };
+        m.extend(h);
+        m.extend(doc! {
+            "extension.palette_hsv.0.s": {"$gte": form.min_s.unwrap_or(0.2)},
+            "extension.palette_hsv.0.v": {"$gte": form.min_v.unwrap_or(0.2)},
+        })
+    }
+
+    let mut cur = db
+        .collection::<LocalMedia<ImageMedia>>("pixiv_image")
+        .aggregate(
+            vec![
+                doc! { "$match": m },
+                doc! { "$sort": {"_id": -1} },
+                doc! { "$limit": form.limit.unwrap_or(300) },
+                doc! { "$group": {"_id": null, "_ids": {"$push": "$_id"} } },
+            ],
+            None,
+        )
+        .await
+        .with_interal()?;
+
+    if let Some(r) = cur.try_next().await.with_interal()? {
+        let ids: AggreateResult = from_document(r).with_interal()?;
+
+        Ok(Json(ids._ids.into_iter().map(|id| id.to_hex()).collect()))
+    } else {
+        Ok(Json(vec![]))
+    }
 }

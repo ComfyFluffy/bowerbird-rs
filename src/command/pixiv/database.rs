@@ -13,7 +13,7 @@ use crate::{
     log::{info, warning},
     model::{
         pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
-        History, ImageMedia, LocalMedia, Rgb,
+        History, Hsv, ImageMedia, LocalMedia,
     },
 };
 
@@ -262,7 +262,7 @@ pub async fn save_image(
     c_image: &Collection<Document>,
     size: i64,
     (w, h): (i32, i32),
-    palette_rgb: Vec<Rgb>,
+    palette_hsv: Vec<Hsv>,
     url: String,
     image_path_db: String,
     image_path: impl AsRef<Path>,
@@ -280,7 +280,7 @@ pub async fn save_image(
                     extension: Some(ImageMedia {
                         width: w,
                         height: h,
-                        palette_rgb,
+                        palette_hsv,
                     })
                 }).context(error::BsonSerialize)?
             },

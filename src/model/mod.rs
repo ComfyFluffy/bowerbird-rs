@@ -49,14 +49,18 @@ pub struct LocalMedia<E> {
     pub extension: Option<E>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct Rgb(pub i16, pub i16, pub i16);
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+pub struct Hsv {
+    pub h: f32,
+    pub s: f32,
+    pub v: f32,
+}
 
-#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq)]
 pub struct ImageMedia {
     pub width: i32,
     pub height: i32,
-    pub palette_rgb: Vec<Rgb>,
+    pub palette_hsv: Vec<Hsv>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -73,4 +77,9 @@ pub struct Collection {
     pub _id: Option<ObjectId>,
     pub name: String,
     pub item_ids: Vec<ObjectId>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BowerbirdMetadata {
+    pub version: i32,
 }

@@ -69,4 +69,6 @@ pub enum Error {
     ServerIo {
         source: std::io::Error,
     },
+    #[snafu(display("The database schema needs to be updated running `bowerbird migrate`. Backup is recommended before migration."))]
+    MigrationRequired,
 }

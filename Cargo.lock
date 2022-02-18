@@ -256,6 +256,7 @@ version = "0.2.0"
 dependencies = [
  "base64",
  "futures",
+ "log",
  "serde",
  "serde_json",
  "snafu 0.7.0",

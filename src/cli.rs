@@ -3,13 +3,17 @@ use std::{
     process::{self, Command},
 };
 
+use bson::to_bson;
 use clap::Parser;
 
+use mongodb::Database;
 use snafu::ResultExt;
 
 use crate::{
-    command, config, error,
+    command::{self, migrate::DB_VERSION},
+    config, error,
     log::{debug, error, warning},
+    model::BowerbirdMetadata,
 };
 
 #[derive(Parser)]
@@ -71,6 +75,26 @@ struct PixivBookmarks {
     private: bool,
 }
 
+async fn migrate_guard(db: &Database) -> crate::Result<()> {
+    if let Some(metadata) = command::migrate::get_metadata(db).await? {
+        if metadata.version < DB_VERSION {
+            return error::MigrationRequired.fail();
+        }
+    } else {
+        db.collection("bowerbird_metadata")
+            .insert_one(
+                to_bson(&BowerbirdMetadata {
+                    version: DB_VERSION,
+                })
+                .unwrap(),
+                None,
+            )
+            .await
+            .context(error::MongoDb)?;
+    }
+    Ok(())
+}
+
 async fn run_internal() -> crate::Result<()> {
     let opts = Main::parse();
 
@@ -89,7 +113,7 @@ async fn run_internal() -> crate::Result<()> {
         Ok(config)
     };
 
-    let pre_fn = async {
+    let pre_fn = |check_migrate: bool| async move {
         let config = config_builder()?;
         let db_client = mongodb::Client::with_options(
             mongodb::options::ClientOptions::parse(&config.mongodb.uri)
@@ -124,14 +148,20 @@ async fn run_internal() -> crate::Result<()> {
         };
 
         let db = db_client.database(&config.mongodb.database_name);
+        if check_migrate {
+            migrate_guard(&db).await?;
+        }
 
         Ok((config, ffmpeg_path, db))
     };
 
     match &opts.subcommand {
-        SubcommandMain::Migrate => {}
+        SubcommandMain::Migrate => {
+            let (_, _, db) = pre_fn(false).await?;
+            command::migrate::migrate(&db).await?;
+        }
         SubcommandMain::Serve => {
-            let (config, _, db) = pre_fn.await?;
+            let (config, _, db) = pre_fn(true).await?;
             crate::server::run(db, config).await?;
         }
         SubcommandMain::Init => {
@@ -142,7 +172,7 @@ async fn run_internal() -> crate::Result<()> {
             let user_id = c.user_id;
             let limit = c.limit;
             let pre_fn = async {
-                let (mut config, ffmpeg_path, db) = pre_fn.await?;
+                let (mut config, ffmpeg_path, db) = pre_fn(true).await?;
                 command::pixiv::database::create_indexes(&db).await?;
                 let mut api_client = reqwest::ClientBuilder::new();
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {

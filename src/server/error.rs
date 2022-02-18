@@ -109,7 +109,7 @@ impl Error {
                     source.to_string()
                 }
             } else {
-                source.to_string()
+                message.to_string()
             },
             source: Some(Box::new(source)),
         }
@@ -121,5 +121,9 @@ impl Error {
             message: message.to_string(),
             source: None,
         }
+    }
+
+    pub fn not_found() -> Error {
+        Error::with_msg(StatusCode::NOT_FOUND, "not found in database")
     }
 }

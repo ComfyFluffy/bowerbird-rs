@@ -85,13 +85,13 @@ async fn on_success_illust(
     path_slash: String,
 ) -> Result<(), BoxError> {
     let size: i64 = tokio::fs::metadata(&image_path).await?.len().try_into()?;
-    let ((w, h), rgb_v) = {
+    let ((w, h), hsv_v) = {
         let image_path = image_path.clone();
         spawn_blocking(move || utils::get_palette(&image_path))
     }
     .await
     .unwrap()?;
-    super::database::save_image(&c_image, size, (w, h), rgb_v, url, path_slash, image_path).await?;
+    super::database::save_image(&c_image, size, (w, h), hsv_v, url, path_slash, image_path).await?;
 
     Ok(())
 }

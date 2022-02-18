@@ -20,6 +20,9 @@ pub struct ThumbnailCacheKey {
 
 pub type ThumbnailCache = HashMap<ThumbnailCacheKey, Bytes>;
 
+/// Spawns cpu-bound task and await for result.
+/// The spawned task is aborted when the handle is dropped.
+///
 /// # Panics
 /// If the semaphore has been closed or `f` panics.
 pub async fn spawn_semaphore<F, R>(semaphore: &Semaphore, f: F) -> R
@@ -38,7 +41,7 @@ pub async fn cached_image_thumbnail(
     semaphore: &Semaphore,
 ) -> super::Result<Bytes> {
     let mut cache_lock = cache.lock().unwrap();
-    if cache_lock.len() > 200 {
+    if cache_lock.len() > 500 {
         let k = cache_lock.keys().next().unwrap().clone();
         cache_lock.remove(&k);
     }
