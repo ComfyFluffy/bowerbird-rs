@@ -75,10 +75,13 @@ struct PixivBookmarks {
     private: bool,
 }
 
-async fn migrate_guard(db: &Database) -> crate::Result<()> {
+async fn migrate_guard(db: &Database, fail_if_out_of_date: bool) -> crate::Result<()> {
     if let Some(metadata) = command::migrate::get_metadata(db).await? {
-        if metadata.version < DB_VERSION {
+        if fail_if_out_of_date && metadata.version < DB_VERSION {
             return error::MigrationRequired.fail();
+        }
+        if metadata.version > DB_VERSION {
+            return error::DatabaseIsNewer.fail();
         }
     } else {
         db.collection("bowerbird_metadata")
@@ -113,7 +116,7 @@ async fn run_internal() -> crate::Result<()> {
         Ok(config)
     };
 
-    let pre_fn = |check_migrate: bool| async move {
+    let pre_fn = |fail_if_out_of_date: bool| async move {
         let config = config_builder()?;
         let db_client = mongodb::Client::with_options(
             mongodb::options::ClientOptions::parse(&config.mongodb.uri)
@@ -148,9 +151,7 @@ async fn run_internal() -> crate::Result<()> {
         };
 
         let db = db_client.database(&config.mongodb.database_name);
-        if check_migrate {
-            migrate_guard(&db).await?;
-        }
+        migrate_guard(&db, fail_if_out_of_date).await?;
 
         Ok((config, ffmpeg_path, db))
     };

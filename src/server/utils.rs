@@ -8,6 +8,7 @@ use std::{
 use actix_web::http::StatusCode;
 use bytes::Bytes;
 use image::{imageops::FilterType::Lanczos3, GenericImageView, ImageOutputFormat};
+
 use tokio::{sync::Semaphore, task::spawn_blocking};
 
 use crate::server::error::ServerErrorExt;

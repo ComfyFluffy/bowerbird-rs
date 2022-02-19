@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "aria2-ws"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "futures",
@@ -351,6 +351,7 @@ dependencies = [
  "env_logger",
  "futures",
  "image",
+ "indexmap",
  "lazy_static",
  "log",
  "mime_guess",
@@ -1243,6 +1244,7 @@ checksum = "282a6247722caba404c065016bbfa522806e51714c34f5dfc3e4a3a46fcb4223"
 dependencies = [
  "autocfg",
  "hashbrown",
+ "serde",
 ]
 
 [[package]]

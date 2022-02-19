@@ -1,7 +1,13 @@
-use std::{str::FromStr, sync::Mutex};
+use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
-use mongodb::{options::FindOneOptions, Database};
+use indexmap::IndexMap;
+use log::debug;
+use mongodb::{
+    options::{FindOneOptions, FindOptions},
+    Database,
+};
 use serde::Deserialize;
 
 use actix_web::{
@@ -14,10 +20,11 @@ use actix_web::{
     web::{self, Data, Json},
     HttpRequest, HttpResponse,
 };
-use bson::{doc, from_document, oid::ObjectId, Document};
+use bson::{doc, oid::ObjectId, Document, Regex};
+
 use tokio::sync::Semaphore;
 
-use crate::model::{ImageMedia, LocalMedia};
+use crate::model::{pixiv::PixivIllust, ImageMedia, LocalMedia, Tag};
 
 use super::utils;
 
@@ -77,29 +84,12 @@ async fn media_redirect(
         } else {
             format!("storage/{path}")
         };
-        Ok(HttpResponse::Found()
+        Ok(HttpResponse::TemporaryRedirect()
             .append_header((header::LOCATION, url))
             .finish())
     } else {
         Err(Error::not_found())
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct MediaByIdQuery {
-    id: String,
-    size: Option<u32>,
-}
-#[get("/media-by-id")]
-async fn media_by_id(
-    query: web::Query<MediaByIdQuery>,
-    db: Data<Database>,
-) -> Result<HttpResponse> {
-    media_redirect(
-        db.as_ref(),
-        doc! { "_id": bson::oid::ObjectId::from_str(&query.id).with_status(StatusCode::BAD_REQUEST)? },
-        query.size,
-    ).await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -120,17 +110,12 @@ struct FindImageMediaForm {
     h_range: Option<(f32, f32)>,
     min_s: Option<f32>,
     min_v: Option<f32>,
-    limit: Option<u32>,
 }
 #[post("/find/media/image")]
 async fn find_image_media(
     db: Data<Database>,
     form: Json<FindImageMediaForm>,
-) -> Result<Json<Vec<String>>> {
-    #[derive(Debug, Clone, Deserialize)]
-    struct AggreateResult {
-        _ids: Vec<ObjectId>,
-    }
+) -> Result<Json<Vec<LocalMedia<ImageMedia>>>> {
     let mut m = Document::new();
 
     if let Some(h_range) = form.h_range {
@@ -149,25 +134,124 @@ async fn find_image_media(
         })
     }
 
-    let mut cur = db
+    let cur = db
         .collection::<LocalMedia<ImageMedia>>("pixiv_image")
-        .aggregate(
-            vec![
-                doc! { "$match": m },
-                doc! { "$sort": {"_id": -1} },
-                doc! { "$limit": form.limit.unwrap_or(300) },
-                doc! { "$group": {"_id": null, "_ids": {"$push": "$_id"} } },
-            ],
-            None,
-        )
+        .find(m, FindOptions::builder().sort(doc! {"_id": -1}).build())
         .await
         .with_interal()?;
 
-    if let Some(r) = cur.try_next().await.with_interal()? {
-        let ids: AggreateResult = from_document(r).with_interal()?;
+    let rv = cur.try_collect().await.with_interal()?;
+    Ok(Json(rv))
+}
 
-        Ok(Json(ids._ids.into_iter().map(|id| id.to_hex()).collect()))
-    } else {
-        Ok(Json(vec![]))
+#[post("/find/tag")]
+async fn find_tag(db: Data<Database>, form: Json<String>) -> Result<Json<Vec<Tag>>> {
+    let tag = form.into_inner();
+    if tag.is_empty() {
+        return Ok(Json(vec![]));
     }
+    let reg = Regex {
+        pattern: regex::escape(&tag),
+        options: "i".to_string(),
+    };
+    let cur = db
+        .collection::<Tag>("pixiv_tag")
+        .find(doc! {"alias": reg}, None)
+        .await
+        .with_interal()?;
+
+    let rv = cur.try_collect().await.with_interal()?;
+    Ok(Json(rv))
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct PixivSearch {
+    tags_or: Option<bool>,
+    tags: Option<Vec<ObjectId>>,
+    search: Option<String>, // Search in title and caption
+    date_range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+    bookmarks_range: Option<(u32, u32)>,
+    sort_by: Option<IndexMap<String, i32>>,
+    source_inaccessible: Option<bool>,
+}
+#[post("/find/illust")]
+async fn find_pixiv_illust(
+    db: Data<Database>,
+    form: Json<PixivSearch>,
+) -> Result<Json<Vec<PixivIllust>>> {
+    let form = form.into_inner();
+    let mut m = Document::new();
+
+    if let Some(tag_ids) = form.tags {
+        if form.tags_or.unwrap_or_default() {
+            m.extend(doc! { "tag_ids": {"$in": tag_ids} });
+        } else {
+            m.extend(doc! { "tag_ids": {"$all": tag_ids} });
+        }
+    }
+
+    if let Some(search) = form.search {
+        let reg = Regex {
+            pattern: search,
+            options: "i".to_string(),
+        };
+        m.extend(doc! { "$or": [
+            { "history.extension.title": &reg },
+            { "history.extension.caption_html": &reg },
+        ]});
+    }
+
+    if let Some((start, end)) = form.date_range {
+        let mut m_date = Document::new();
+        if let Some(start) = start {
+            m_date.insert("$gte", start);
+        }
+        if let Some(end) = end {
+            m_date.insert("$lte", end);
+        }
+        if m_date.len() == 0 {
+            return Err(Error::with_msg(
+                StatusCode::BAD_REQUEST,
+                "date_range is empty",
+            ));
+        }
+        m.extend(doc! { "history.extension.date": m_date });
+    }
+
+    if let Some((min_bookmarks, max_bookmarks)) = form.bookmarks_range {
+        if max_bookmarks != 0 {
+            m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks, "$lte": max_bookmarks} });
+        } else {
+            m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks} });
+        }
+    }
+
+    if let Some(source_inaccessible) = form.source_inaccessible {
+        m.insert("source_inaccessible", source_inaccessible);
+    }
+
+    debug!("Find illust: {:?}", m);
+
+    let cur = db
+        .collection::<PixivIllust>("pixiv_illust")
+        .find(
+            m,
+            FindOptions::builder()
+                .sort(
+                    form.sort_by
+                        .map(|s| {
+                            let mut r = Document::new();
+                            for (k, v) in s {
+                                r.insert(k, v);
+                            }
+                            r
+                        })
+                        .unwrap_or(doc! {"_id": -1}),
+                )
+                .build(),
+        )
+        .await
+        .with_interal()?;
+    let rv = cur.try_collect().await.with_interal()?;
+    Ok(Json(rv))
 }

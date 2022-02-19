@@ -23,7 +23,7 @@ impl std::error::Error for Error {}
 
 impl actix_web::error::ResponseError for Error {
     fn error_response(&self) -> actix_web::HttpResponse {
-        actix_web::HttpResponse::build(self.status_code()).json(&self)
+        actix_web::HttpResponse::build(self.status_code()).body(self.message.clone())
     }
 
     fn status_code(&self) -> StatusCode {
@@ -71,25 +71,6 @@ where
                 false,
             )
         })
-    }
-}
-
-pub trait IoConvert<T> {
-    fn convert(self) -> Result<T, Error>;
-}
-
-impl<T> IoConvert<T> for std::io::Result<T> {
-    fn convert(self) -> Result<T, Error> {
-        match self {
-            Ok(t) => Ok(t),
-            Err(err) => {
-                let status = match err.kind() {
-                    std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
-                    _ => StatusCode::INTERNAL_SERVER_ERROR,
-                };
-                Err(Error::new(status, "", err, true))
-            }
-        }
     }
 }
 

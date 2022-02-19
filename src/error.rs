@@ -66,9 +66,12 @@ pub enum Error {
     NoAvaliablePort {
         message: String,
     },
+    #[snafu(display("fail to start server: {source}"))]
     ServerIo {
         source: std::io::Error,
     },
     #[snafu(display("The database schema needs to be updated running `bowerbird migrate`. Backup is recommended before migration."))]
     MigrationRequired,
+    #[snafu(display("The database schema is newer than this version of bowerbird. Please update to the latest version."))]
+    DatabaseIsNewer,
 }
