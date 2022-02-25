@@ -9,6 +9,7 @@ use actix_web::http::StatusCode;
 use bytes::Bytes;
 use image::{imageops::FilterType::Lanczos3, GenericImageView, ImageOutputFormat};
 
+use log::debug;
 use tokio::{sync::Semaphore, task::spawn_blocking};
 
 use crate::server::error::ServerErrorExt;
@@ -89,7 +90,7 @@ fn make_thumbnail(local_path: impl AsRef<Path>, size: u32) -> super::Result<Byte
     img.write_to(&mut b, ImageOutputFormat::Jpeg(85))
         .with_interal()?;
     b.shrink_to_fit();
-    log::debug!(
+    debug!(
         "made thumbnail for {:?}: {:?}",
         local_path.as_ref(),
         t.elapsed()

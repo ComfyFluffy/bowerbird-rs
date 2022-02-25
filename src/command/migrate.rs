@@ -1,15 +1,14 @@
-use bson::{doc, to_bson};
-use futures::TryStreamExt;
-use mongodb::Database;
-use serde::Deserialize;
-use snafu::ResultExt;
-
 use crate::{
     error,
-    log::info,
     model::{BowerbirdMetadata, Hsv, LocalMedia},
     utils::rgb_to_hsv,
 };
+use bson::{doc, to_bson};
+use futures::TryStreamExt;
+use log::info;
+use mongodb::Database;
+use serde::Deserialize;
+use snafu::ResultExt;
 
 pub const DB_VERSION: i32 = 2;
 
@@ -93,7 +92,7 @@ pub async fn migrate(db: &Database) -> crate::Result<()> {
     if let Some(metadata) = get_metadata(db).await? {
         if metadata.version < DB_VERSION {
             for version in metadata.version + 1..=DB_VERSION {
-                info!("Migrating to version {}", version);
+                info!("migrating database to version {}", version);
                 operations(db, version).await?;
             }
         }

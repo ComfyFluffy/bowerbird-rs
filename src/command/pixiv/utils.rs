@@ -6,17 +6,16 @@ use std::{
     time::Duration,
 };
 
-use image::GenericImageView;
-use pixivcrab::Pager;
-use serde::de::DeserializeOwned;
-use snafu::ResultExt;
-
 use crate::{
     error::{self, BoxError},
-    log::{debug, warning},
     model::Hsv,
     utils::rgb_to_hsv,
 };
+use image::GenericImageView;
+use log::warn;
+use pixivcrab::Pager;
+use serde::de::DeserializeOwned;
+use snafu::ResultExt;
 
 pub fn ugoira_to_mp4(
     ffmpeg_path: impl AsRef<Path>,
@@ -107,7 +106,6 @@ where
     let mut tries = 0;
     loop {
         tries += 1;
-        debug!("Executing pager {:?}", pager);
         match pager.next().await.context(error::PixivApi) {
             Ok(r) => {
                 return Ok(r);
@@ -116,7 +114,7 @@ where
                 if let error::Error::PixivApi { source, .. } = &e {
                     if let pixivcrab::error::Error::HTTP { .. } = source {
                         if tries <= max_tries {
-                            warning!("retrying on pixiv api error: {:?} :{}", pager, e);
+                            warn!("retrying on pixiv api error: {:?} :{}", pager, e);
                             tokio::time::sleep(Duration::from_secs(2)).await;
                             continue;
                         }

@@ -6,13 +6,13 @@ use std::{
 use bson::to_bson;
 use clap::Parser;
 
+use log::{debug, error, warn};
 use mongodb::Database;
 use snafu::ResultExt;
 
 use crate::{
     command::{self, migrate::DB_VERSION},
     config, error,
-    log::{debug, error, warning},
     model::BowerbirdMetadata,
 };
 
@@ -109,9 +109,7 @@ async fn run_internal() -> crate::Result<()> {
         }
         .join("config.json");
         let config = config::Config::from_file(&config_path)?;
-        config.set_log_level();
-
-        debug!("Config loaded: {:?}", config_path);
+        debug!("config loaded: {:?}", config_path);
 
         Ok(config)
     };
@@ -125,7 +123,7 @@ async fn run_internal() -> crate::Result<()> {
         )
         .context(error::MongoDb)?;
 
-        debug!("Connected to MongoDB: {}", config.mongodb.uri);
+        debug!("connected to mongodb: {}", config.mongodb.uri);
 
         let ffmpeg_path = if config.ffmpeg_path.is_empty() {
             PathBuf::from("ffmpeg")
@@ -133,14 +131,14 @@ async fn run_internal() -> crate::Result<()> {
             PathBuf::from(&config.ffmpeg_path)
         };
 
-        debug!("FFmpeg path: {:?}", ffmpeg_path);
+        debug!("ffmpeg path: {:?}", ffmpeg_path);
 
         let mut ffmpeg = Command::new(&ffmpeg_path);
         ffmpeg.args(["-hide_banner", "-loglevel", "error"]);
         let ffmpeg_exists = ffmpeg.spawn().is_ok();
         if !ffmpeg_exists {
-            warning!(
-                "FFmpeg not found, some functions will not work: {}",
+            warn!(
+                "ffmpeg not found, some functions will not work: {}",
                 ffmpeg_path.to_string_lossy()
             );
         }
@@ -177,11 +175,11 @@ async fn run_internal() -> crate::Result<()> {
                 command::pixiv::database::create_indexes(&db).await?;
                 let mut api_client = reqwest::ClientBuilder::new();
                 if let Some(proxy) = config.pxoxy(&config.pixiv.proxy_api)? {
-                    debug!("pixiv api proxy set");
+                    debug!("pixiv api proxy set: {:?}", proxy);
                     api_client = api_client.proxy(proxy);
                 }
                 if let Ok(_) = std::env::var("BOWERBIRD_ACCEPT_INVALID_CERTS") {
-                    warning!("Will ignore certs for pixiv api requests");
+                    warn!("invalid certs will be accepted for pixiv api requests");
                     api_client = api_client.danger_accept_invalid_certs(true);
                 }
                 let api = pixivcrab::AppAPI::new(
@@ -280,7 +278,7 @@ async fn run_internal() -> crate::Result<()> {
 pub async fn run() {
     match run_internal().await {
         Err(e) => {
-            error!(e);
+            error!("{}", e);
             process::exit(1);
         }
         _ => {}

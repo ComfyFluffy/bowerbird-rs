@@ -1,6 +1,7 @@
 use std::fmt;
 
 use actix_web::http::StatusCode;
+use log::error;
 use serde::{Deserialize, Serialize};
 
 use crate::error::BoxError;
@@ -63,7 +64,7 @@ where
 
     fn with_interal(self) -> Result<T, Error> {
         self.map_err(|err| {
-            log::error!("Internal Server Error: {}", err);
+            error!("Internal Server Error: {}", err);
             Error::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal server error",

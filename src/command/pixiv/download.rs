@@ -9,8 +9,9 @@ use tokio::task::spawn_blocking;
 use crate::{
     downloader::{Aria2Downloader, Task, TaskHooks},
     error::{self, BoxError},
-    log::warning,
 };
+
+use log::warn;
 
 use mongodb::{
     bson::{doc, Document},
@@ -48,7 +49,7 @@ macro_rules! try_skip {
         match $res {
             Ok(val) => val,
             Err(e) => {
-                warning!("{}", e);
+                warn!("{}", e);
                 continue;
             }
         }
@@ -211,7 +212,7 @@ pub async fn download_illusts(
                 )
                 .await
                 {
-                    warning!("Fail to build task from {}: {}", zip_url, err);
+                    warn!("Fail to build task from {}: {}", zip_url, err);
                 }
             }
         }

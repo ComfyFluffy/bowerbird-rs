@@ -1,7 +1,8 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aria2_ws::Client;
-use futures::{Future, FutureExt};
+use futures::{future::BoxFuture, FutureExt};
+use log::{debug, warn};
 pub use reqwest::header::HeaderMap;
 use snafu::ResultExt;
 use tokio::{
@@ -11,7 +12,6 @@ use tokio::{
 
 use crate::{
     error,
-    log::warning,
     utils::{get_available_port, WaitGroup},
 };
 
@@ -70,13 +70,15 @@ impl Aria2Downloader {
         })
     }
 
-    fn map_hook(&self, hook: Option<super::BoxFutureResult>) -> impl Future<Output = ()> {
+    fn map_hook(&self, hook: Option<super::BoxFutureResult>) -> BoxFuture<'static, ()> {
         let waitgroup = self.waitgroup.clone();
         if let Some(hook) = hook {
             async move {
+                let i = Instant::now();
                 if let Err(err) = hook.await {
-                    warning!("error on hook: {}", err);
+                    warn!("error on hook: {}", err);
                 }
+                debug!("hook took {:?}", i.elapsed());
                 waitgroup.done();
             }
             .boxed()
@@ -87,8 +89,8 @@ impl Aria2Downloader {
 
     pub async fn add_task(&self, task: Task) -> crate::Result<()> {
         let hooks = task.hooks.map(|hooks| aria2_ws::TaskHooks {
-            on_complete: Some(self.map_hook(hooks.on_success).boxed()),
-            on_error: Some(self.map_hook(hooks.on_error).boxed()),
+            on_complete: Some(self.map_hook(hooks.on_success)),
+            on_error: Some(self.map_hook(hooks.on_error)),
         });
         self.client
             .add_uri(vec![task.url], task.options, None, hooks)

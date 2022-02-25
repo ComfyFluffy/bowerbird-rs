@@ -2,6 +2,7 @@ use chrono::{Duration, Utc};
 use path_slash::PathBufExt;
 use pixivcrab::AppAPI;
 
+use log::{info, warn};
 use snafu::ResultExt;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -10,7 +11,6 @@ use std::{
 
 use crate::{
     error::{self, BoxError},
-    log::{info, warning},
     model::{
         pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
         History, Hsv, ImageMedia, LocalMedia,
@@ -133,7 +133,7 @@ fn insert_tags_to_alias(tags: &Vec<pixivcrab::models::Tag>, tags_set: &mut HashS
 }
 
 async fn set_item_invisible(c_item: &Collection<Document>, source_id: &str) -> crate::Result<()> {
-    warning!("pixiv: Works {} is invisible!", source_id);
+    warn!("pixiv: Works {} is invisible!", source_id);
     c_item
         .update_one(
             doc! {
@@ -170,7 +170,7 @@ async fn update_user_detail(
     user_id: &str,
     c_user: &Collection<Document>,
 ) -> crate::Result<()> {
-    info!("pixiv database: Updating user {}", &user_id);
+    info!("updating pixiv user {}", user_id);
     let resp = api.user_detail(&user_id).await.context(error::PixivApi)?;
     let user = PixivUser {
         last_modified: Some(DateTime::now()),
@@ -542,7 +542,7 @@ pub async fn save_novels(
             continue;
         }
 
-        info!("pixiv: Getting novel text of {}", &novel_id);
+        info!("pixiv: getting novel text of {}", novel_id);
         let r = api.novel_text(&novel_id).await.context(error::PixivApi)?;
 
         let history = History {

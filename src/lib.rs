@@ -3,7 +3,7 @@ mod command;
 mod config;
 mod downloader;
 mod error;
-mod log;
+// mod log;
 pub mod model;
 mod server;
 mod utils;

@@ -24,10 +24,6 @@ struct PixivConfig {
 }
 
 pub async fn run(db: Database, config: Config) -> crate::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
-    std::env::set_var("RUST_BACKTRACE", "1");
-    env_logger::init();
-
     let thumbnail_cache = Data::new(Mutex::new(ThumbnailCache::new()));
     let pixiv_config = Data::new(PixivConfig {
         storage_dir: config.sub_dir(&config.pixiv.storage_dir),
