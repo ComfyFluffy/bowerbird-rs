@@ -87,7 +87,7 @@ async fn on_success_illust(
     let size: i64 = tokio::fs::metadata(&image_path).await?.len().try_into()?;
     let ((w, h), hsv_v) = {
         let image_path = image_path.clone();
-        spawn_blocking(move || utils::get_palette(&image_path))
+        spawn_blocking(move || utils::get_palette(image_path))
     }
     .await
     .unwrap()?;

@@ -35,12 +35,14 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
     let db = Data::new(db);
 
     let cpu_workers_sem = Data::new(Semaphore::new(num_cpus::get()));
+
     HttpServer::new(move || {
         let scope_pixiv = web::scope("/pixiv")
             .service(Files::new("/storage", pixiv_config.storage_dir.clone()))
             .service(pixiv::thumbnail)
-            .service(pixiv::find_pixiv_illust)
+            .service(pixiv::find_illust)
             .service(pixiv::find_tag)
+            .service(pixiv::media_by_url)
             .service(pixiv::find_image_media);
 
         let scope_v1 = web::scope("/api/v1").service(scope_pixiv);

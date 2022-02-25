@@ -1,6 +1,5 @@
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use log::debug;
@@ -20,7 +19,7 @@ use actix_web::{
     web::{self, Data, Json},
     HttpRequest, HttpResponse,
 };
-use bson::{doc, oid::ObjectId, Document, Regex};
+use bson::{doc, oid::ObjectId, to_document, DateTime, Document, Regex};
 
 use tokio::sync::Semaphore;
 
@@ -147,16 +146,20 @@ async fn find_image_media(
 #[post("/find/tag")]
 async fn find_tag(db: Data<Database>, form: Json<String>) -> Result<Json<Vec<Tag>>> {
     let tag = form.into_inner();
-    if tag.is_empty() {
-        return Ok(Json(vec![]));
-    }
-    let reg = Regex {
-        pattern: regex::escape(&tag),
-        options: "i".to_string(),
+
+    let f = if tag.is_empty() {
+        None
+    } else {
+        let reg = Regex {
+            pattern: regex::escape(&tag),
+            options: "i".to_string(),
+        };
+        Some(doc! {"alias": reg})
     };
+
     let cur = db
         .collection::<Tag>("pixiv_tag")
-        .find(doc! {"alias": reg}, None)
+        .find(f, None)
         .await
         .with_interal()?;
 
@@ -169,13 +172,13 @@ struct PixivSearch {
     tags_or: Option<bool>,
     tags: Option<Vec<ObjectId>>,
     search: Option<String>, // Search in title and caption
-    date_range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+    date_range: Option<(Option<DateTime>, Option<DateTime>)>,
     bookmarks_range: Option<(u32, u32)>,
     sort_by: Option<IndexMap<String, i32>>,
     source_inaccessible: Option<bool>,
 }
 #[post("/find/illust")]
-async fn find_pixiv_illust(
+async fn find_illust(
     db: Data<Database>,
     form: Json<PixivSearch>,
 ) -> Result<Json<Vec<PixivIllust>>> {
@@ -183,22 +186,26 @@ async fn find_pixiv_illust(
     let mut m = Document::new();
 
     if let Some(tag_ids) = form.tags {
-        if form.tags_or.unwrap_or_default() {
-            m.extend(doc! { "tag_ids": {"$in": tag_ids} });
-        } else {
-            m.extend(doc! { "tag_ids": {"$all": tag_ids} });
+        if !tag_ids.is_empty() {
+            if form.tags_or.unwrap_or_default() {
+                m.extend(doc! { "tag_ids": {"$in": tag_ids} });
+            } else {
+                m.extend(doc! { "tag_ids": {"$all": tag_ids} });
+            }
         }
     }
 
     if let Some(search) = form.search {
-        let reg = Regex {
-            pattern: search,
-            options: "i".to_string(),
-        };
-        m.extend(doc! { "$or": [
-            { "history.extension.title": &reg },
-            { "history.extension.caption_html": &reg },
-        ]});
+        if !search.is_empty() {
+            let reg = Regex {
+                pattern: search,
+                options: "i".to_string(),
+            };
+            m.extend(doc! { "$or": [
+                { "history.extension.title": &reg },
+                { "history.extension.caption_html": &reg },
+            ]});
+        }
     }
 
     if let Some((start, end)) = form.date_range {
@@ -209,13 +216,9 @@ async fn find_pixiv_illust(
         if let Some(end) = end {
             m_date.insert("$lte", end);
         }
-        if m_date.len() == 0 {
-            return Err(Error::with_msg(
-                StatusCode::BAD_REQUEST,
-                "date_range is empty",
-            ));
+        if m_date.len() > 0 {
+            m.extend(doc! { "history.extension.date": m_date });
         }
-        m.extend(doc! { "history.extension.date": m_date });
     }
 
     if let Some((min_bookmarks, max_bookmarks)) = form.bookmarks_range {
@@ -232,24 +235,30 @@ async fn find_pixiv_illust(
 
     debug!("Find illust: {:?}", m);
 
+    if let Some(ref sort_by) = form.sort_by {
+        for (_, v) in sort_by {
+            match *v {
+                1 | -1 => {}
+                _ => {
+                    return Err(Error::with_msg(
+                        StatusCode::BAD_REQUEST,
+                        "sort_by value must be 1 or -1",
+                    ))
+                }
+            }
+        }
+    }
+
+    let options = FindOptions::builder()
+        .sort(
+            form.sort_by
+                .map_or(doc! {"_id": -1}, |s| to_document(&s).unwrap()),
+        )
+        .build();
+
     let cur = db
         .collection::<PixivIllust>("pixiv_illust")
-        .find(
-            m,
-            FindOptions::builder()
-                .sort(
-                    form.sort_by
-                        .map(|s| {
-                            let mut r = Document::new();
-                            for (k, v) in s {
-                                r.insert(k, v);
-                            }
-                            r
-                        })
-                        .unwrap_or(doc! {"_id": -1}),
-                )
-                .build(),
-        )
+        .find(m, options)
         .await
         .with_interal()?;
     let rv = cur.try_collect().await.with_interal()?;
