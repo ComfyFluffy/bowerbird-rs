@@ -195,11 +195,8 @@ async fn update_user_detail(
         .await
         .context(error::MongoDb)?;
 
-    fn none_if_empty(s: String) -> Option<String> {
-        match s.as_str() {
-            "" => None,
-            _ => Some(s),
-        }
+    fn filter_empty(s: &String) -> bool {
+        !s.is_empty()
     }
 
     let history = History {
@@ -208,14 +205,14 @@ async fn update_user_detail(
             account: resp.user.account,
             name: resp.user.name,
             avatar_url: Some(resp.user.profile_image_urls.medium),
-            gender: none_if_empty(resp.profile.gender),
-            background_url: resp.profile.background_image_url.filter(|s| !s.is_empty()),
-            birth: none_if_empty(resp.profile.birth),
-            comment: resp.user.comment.filter(|s| !s.is_empty()),
+            gender: Some(resp.profile.gender).filter(filter_empty),
+            background_url: resp.profile.background_image_url.filter(filter_empty),
+            birth: Some(resp.profile.birth).filter(filter_empty),
+            comment: resp.user.comment.filter(filter_empty),
             is_premium: resp.profile.is_premium,
-            region: resp.profile.region.filter(|s| !s.is_empty()),
-            twitter_account: resp.profile.twitter_account.filter(|s| !s.is_empty()),
-            web_page: resp.profile.webpage.filter(|s| !s.is_empty()),
+            region: resp.profile.region.filter(filter_empty),
+            twitter_account: resp.profile.twitter_account.filter(filter_empty),
+            web_page: resp.profile.webpage.filter(filter_empty),
             workspace_image_url: resp
                 .workspace
                 .get("workspace_image_url")
