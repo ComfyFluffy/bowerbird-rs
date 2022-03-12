@@ -222,10 +222,12 @@ async fn find_illust(
     }
 
     if let Some((min_bookmarks, max_bookmarks)) = form.bookmarks_range {
-        if max_bookmarks != 0 {
-            m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks, "$lte": max_bookmarks} });
-        } else {
-            m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks} });
+        if min_bookmarks != 0 || max_bookmarks != 0 {
+            if max_bookmarks != 0 {
+                m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks, "$lte": max_bookmarks} });
+            } else {
+                m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks} });
+            }
         }
     }
 
