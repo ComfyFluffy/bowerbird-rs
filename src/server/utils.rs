@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::Cursor,
     path::{Path, PathBuf},
     sync::Mutex,
     time::Instant,
@@ -41,6 +42,7 @@ pub async fn cached_image_thumbnail(
     size: u32,
     cache: &Mutex<ThumbnailCache>,
     semaphore: &Semaphore,
+    quality: u8,
 ) -> super::Result<Bytes> {
     let mut cache_lock = cache.lock().unwrap();
     if cache_lock.len() > 500 {
@@ -59,7 +61,7 @@ pub async fn cached_image_thumbnail(
 
         let b = spawn_semaphore(semaphore, {
             let local_path = local_path.clone();
-            move || make_thumbnail(local_path, size)
+            move || make_thumbnail(local_path, size, quality)
         })
         .await?;
 
@@ -71,7 +73,7 @@ pub async fn cached_image_thumbnail(
     }
 }
 
-fn make_thumbnail(local_path: impl AsRef<Path>, size: u32) -> super::Result<Bytes> {
+fn make_thumbnail(local_path: impl AsRef<Path>, size: u32, quality: u8) -> super::Result<Bytes> {
     let t = Instant::now();
     let img = image::io::Reader::open(&local_path)
         .with_status(StatusCode::NOT_FOUND)?
@@ -86,9 +88,10 @@ fn make_thumbnail(local_path: impl AsRef<Path>, size: u32) -> super::Result<Byte
     } else {
         img.resize(size, size, Lanczos3)
     };
-    let mut b = Vec::with_capacity(1024 * 50);
-    img.write_to(&mut b, ImageOutputFormat::Jpeg(85))
+    let mut b = Cursor::new(Vec::with_capacity(1024 * 50));
+    img.write_to(&mut b, ImageOutputFormat::Jpeg(quality))
         .with_interal()?;
+    let mut b = b.into_inner();
     b.shrink_to_fit();
     debug!(
         "made thumbnail for {:?}: {:?}",

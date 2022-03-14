@@ -53,7 +53,7 @@ impl Aria2Downloader {
             .context(error::Aria2StartUpIo)?;
         match timeout(Duration::from_millis(100), child.wait()).await {
             Ok(r) => {
-                return error::Aria2StartUpExit {
+                return error::Aria2EarlyExited {
                     status: r.context(error::Aria2StartUpIo)?,
                 }
                 .fail();

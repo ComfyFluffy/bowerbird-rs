@@ -55,7 +55,7 @@ pub enum Error {
         source: std::io::Error,
     },
     #[snafu(display("aria2 startup error with code: {status}"))]
-    Aria2StartUpExit {
+    Aria2EarlyExited {
         status: ExitStatus,
     },
     #[snafu(display("aria2 exit error: {source}"))]

@@ -10,6 +10,7 @@ use actix_web::{
     web::{self, Data},
     App, HttpServer,
 };
+use log::info;
 use mongodb::Database;
 use snafu::ResultExt;
 use tokio::sync::Semaphore;
@@ -32,25 +33,30 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
 
     let cpu_workers_sem = Data::new(Semaphore::new(num_cpus::get()));
 
-    HttpServer::new(move || {
-        let scope_pixiv = web::scope("/pixiv")
-            .service(Files::new("/storage", pixiv_config.storage_dir.clone()))
-            .service(pixiv::thumbnail)
-            .service(pixiv::find_illust)
-            .service(pixiv::find_tag)
-            .service(pixiv::media_by_url)
-            .service(pixiv::find_image_media);
+    info!("server listening on http://{}", config.server.listen_addr);
+    HttpServer::new({
+        let config = Data::new(config.clone());
+        move || {
+            let scope_pixiv = web::scope("/pixiv")
+                .service(Files::new("/storage", pixiv_config.storage_dir.clone()))
+                .service(pixiv::thumbnail)
+                .service(pixiv::find_illust)
+                .service(pixiv::find_tag)
+                .service(pixiv::media_by_url)
+                .service(pixiv::find_image_media);
 
-        let scope_v1 = web::scope("/api/v1").service(scope_pixiv);
+            let scope_v1 = web::scope("/api/v1").service(scope_pixiv);
 
-        App::new()
-            .app_data(db.clone())
-            .app_data(thumbnail_cache.clone())
-            .app_data(pixiv_config.clone())
-            .app_data(cpu_workers_sem.clone())
-            .service(scope_v1)
+            App::new()
+                .app_data(db.clone())
+                .app_data(thumbnail_cache.clone())
+                .app_data(pixiv_config.clone())
+                .app_data(cpu_workers_sem.clone())
+                .app_data(config.clone())
+                .service(scope_v1)
+        }
     })
-    .bind(("127.0.0.1", 5000))
+    .bind(config.server.listen_addr)
     .context(crate::error::ServerIo)?
     .run()
     .await

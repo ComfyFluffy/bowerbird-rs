@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::{
     fs::{File, OpenOptions},
+    net::SocketAddr,
     path::{Path, PathBuf},
 };
 
@@ -15,11 +16,12 @@ pub struct Config {
     config_path: Option<PathBuf>,
 
     pub root_storage_dir: String,
-    pub mongodb: MongoDBConfig,
-    pub pixiv: PixivConfig,
     pub proxy_all: String,
     pub ffmpeg_path: String,
     pub aria2_path: String,
+    pub mongodb: MongoDBConfig,
+    pub pixiv: PixivConfig,
+    pub server: ServerConfig,
 }
 
 impl Default for Config {
@@ -31,11 +33,12 @@ impl Default for Config {
                 .join(".bowerbird")
                 .to_string_lossy()
                 .to_string(),
-            mongodb: MongoDBConfig::default(),
-            pixiv: PixivConfig::default(),
             proxy_all: "".to_string(),
             ffmpeg_path: "".to_string(),
             aria2_path: "aria2c".to_string(),
+            mongodb: MongoDBConfig::default(),
+            pixiv: PixivConfig::default(),
+            server: ServerConfig::default(),
         }
     }
 }
@@ -74,6 +77,22 @@ impl Default for PixivConfig {
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
             language: "en".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ServerConfig {
+    pub listen_addr: SocketAddr,
+    pub thumbnail_jpeg_quality: u8,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            listen_addr: "127.0.0.1:5000".parse().unwrap(),
+            thumbnail_jpeg_quality: 85,
         }
     }
 }

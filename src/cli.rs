@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    process::{self, Command},
-};
+use std::{path::PathBuf, process, time::Duration};
 
 use bson::to_bson;
 use clap::Parser;
@@ -9,6 +6,7 @@ use clap::Parser;
 use log::{debug, error, warn};
 use mongodb::Database;
 use snafu::ResultExt;
+use tokio::{process::Command, time::timeout};
 
 use crate::{
     command::{self, migrate::DB_VERSION},
@@ -131,21 +129,23 @@ async fn run_internal() -> crate::Result<()> {
             PathBuf::from(&config.ffmpeg_path)
         };
 
-        debug!("ffmpeg path: {:?}", ffmpeg_path);
+        debug!("checking ffmpeg: {:?}", ffmpeg_path);
 
         let mut ffmpeg = Command::new(&ffmpeg_path);
         ffmpeg.args(["-hide_banner", "-loglevel", "error"]);
-        let ffmpeg_exists = ffmpeg.spawn().is_ok();
-        if !ffmpeg_exists {
-            warn!(
-                "ffmpeg not found, some functions will not work: {}",
-                ffmpeg_path.to_string_lossy()
-            );
-        }
-        let ffmpeg_path = if ffmpeg_exists {
-            Some(ffmpeg_path)
-        } else {
-            None
+        let ffmpeg_path = match ffmpeg.spawn() {
+            Ok(mut child) => {
+                let _ = timeout(Duration::from_secs(1), child.wait()).await;
+                Some(ffmpeg_path)
+            }
+            Err(err) => {
+                warn!(
+                    "ffmpeg not found, some functions will not work: {}: {}",
+                    ffmpeg_path.to_string_lossy(),
+                    err
+                );
+                None
+            }
         };
 
         let db = db_client.database(&config.mongodb.database_name);
@@ -178,7 +178,7 @@ async fn run_internal() -> crate::Result<()> {
                     debug!("pixiv api proxy set: {:?}", proxy);
                     api_client = api_client.proxy(proxy);
                 }
-                if let Ok(_) = std::env::var("BOWERBIRD_ACCEPT_INVALID_CERTS") {
+                if std::env::var("BOWERBIRD_ACCEPT_INVALID_CERTS").is_ok() {
                     warn!("invalid certs will be accepted for pixiv api requests");
                     api_client = api_client.danger_accept_invalid_certs(true);
                 }
@@ -281,6 +281,8 @@ pub async fn run() {
             error!("{}", e);
             process::exit(1);
         }
-        _ => {}
+        _ => {
+            process::exit(0);
+        }
     };
 }

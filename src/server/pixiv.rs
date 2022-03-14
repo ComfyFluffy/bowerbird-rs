@@ -23,7 +23,10 @@ use bson::{doc, oid::ObjectId, to_document, DateTime, Document, Regex};
 
 use tokio::sync::Semaphore;
 
-use crate::model::{pixiv::PixivIllust, ImageMedia, LocalMedia, Tag};
+use crate::{
+    config::Config,
+    model::{pixiv::PixivIllust, ImageMedia, LocalMedia, Tag},
+};
 
 use super::utils;
 
@@ -38,7 +41,8 @@ async fn thumbnail(
     req: HttpRequest,
     path: web::Path<(String,)>,
     query: web::Query<ThumbnailQuery>,
-    config: Data<PixivConfig>,
+    config: Data<Config>,
+    pixiv_config: Data<PixivConfig>,
     cache: Data<Mutex<utils::ThumbnailCache>>,
     semaphore: Data<Semaphore>,
 ) -> Result<HttpResponse> {
@@ -48,12 +52,18 @@ async fn thumbnail(
     if query.size > 1024 {
         return Err(Error::with_msg(StatusCode::BAD_REQUEST, "size too large"));
     }
-    let path = config
+    let path = pixiv_config
         .storage_dir
         .join(path.0.replace("../", "").replace("..\\", ""));
 
-    let img =
-        utils::cached_image_thumbnail(path, query.size, cache.as_ref(), semaphore.as_ref()).await?;
+    let img = utils::cached_image_thumbnail(
+        path,
+        query.size,
+        cache.as_ref(),
+        semaphore.as_ref(),
+        config.server.thumbnail_jpeg_quality,
+    )
+    .await?;
 
     Ok(HttpResponse::Ok()
         .content_type(ContentType::jpeg())
@@ -143,15 +153,18 @@ async fn find_image_media(
     Ok(Json(rv))
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct FindTagForm {
+    search: String,
+    limit: u32,
+}
 #[post("/find/tag")]
-async fn find_tag(db: Data<Database>, form: Json<String>) -> Result<Json<Vec<Tag>>> {
-    let tag = form.into_inner();
-
-    let f = if tag.is_empty() {
+async fn find_tag(db: Data<Database>, form: Json<FindTagForm>) -> Result<Json<Vec<Tag>>> {
+    let f = if form.search.is_empty() {
         None
     } else {
         let reg = Regex {
-            pattern: regex::escape(&tag),
+            pattern: regex::escape(&form.search),
             options: "i".to_string(),
         };
         Some(doc! {"alias": reg})
@@ -159,7 +172,7 @@ async fn find_tag(db: Data<Database>, form: Json<String>) -> Result<Json<Vec<Tag
 
     let cur = db
         .collection::<Tag>("pixiv_tag")
-        .find(f, None)
+        .find(f, FindOptions::builder().limit(form.limit as i64).build())
         .await
         .with_interal()?;
 
@@ -168,7 +181,7 @@ async fn find_tag(db: Data<Database>, form: Json<String>) -> Result<Json<Vec<Tag
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-struct PixivSearch {
+struct FindIllustForm {
     tags_or: Option<bool>,
     tags: Option<Vec<ObjectId>>,
     search: Option<String>, // Search in title and caption
@@ -176,11 +189,12 @@ struct PixivSearch {
     bookmarks_range: Option<(u32, u32)>,
     sort_by: Option<IndexMap<String, i32>>,
     source_inaccessible: Option<bool>,
+    parent_ids: Option<Vec<ObjectId>>,
 }
 #[post("/find/illust")]
 async fn find_illust(
     db: Data<Database>,
-    form: Json<PixivSearch>,
+    form: Json<FindIllustForm>,
 ) -> Result<Json<Vec<PixivIllust>>> {
     let form = form.into_inner();
     let mut m = Document::new();
@@ -233,6 +247,12 @@ async fn find_illust(
 
     if let Some(source_inaccessible) = form.source_inaccessible {
         m.insert("source_inaccessible", source_inaccessible);
+    }
+
+    if let Some(parent_ids) = form.parent_ids {
+        if !parent_ids.is_empty() {
+            m.extend(doc! { "parent_id": {"$in": parent_ids} });
+        }
     }
 
     debug!("Find illust: {:?}", m);
