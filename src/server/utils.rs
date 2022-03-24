@@ -19,6 +19,7 @@ use crate::server::error::ServerErrorExt;
 pub struct ThumbnailCacheKey {
     size: u32,
     local_path: PathBuf,
+    crop_to_center: bool,
 }
 
 pub type ThumbnailCache = HashMap<ThumbnailCacheKey, Bytes>;
@@ -43,6 +44,7 @@ pub async fn cached_image_thumbnail(
     cache: &Mutex<ThumbnailCache>,
     semaphore: &Semaphore,
     quality: u8,
+    crop_to_center: bool,
 ) -> super::Result<Bytes> {
     let mut cache_lock = cache.lock().unwrap();
     if cache_lock.len() > 500 {
@@ -54,6 +56,7 @@ pub async fn cached_image_thumbnail(
     if let Some(b) = cache_lock.get(&ThumbnailCacheKey {
         local_path: local_path.clone(),
         size,
+        crop_to_center,
     }) {
         Ok(b.clone())
     } else {
@@ -61,19 +64,35 @@ pub async fn cached_image_thumbnail(
 
         let b = spawn_semaphore(semaphore, {
             let local_path = local_path.clone();
-            move || make_thumbnail(local_path, size, quality)
+            move || {
+                make_thumbnail(
+                    local_path,
+                    size,
+                    quality,
+                    if crop_to_center { Some(0.75) } else { None },
+                )
+            }
         })
         .await?;
 
-        cache
-            .lock()
-            .unwrap()
-            .insert(ThumbnailCacheKey { local_path, size }, b.clone());
+        cache.lock().unwrap().insert(
+            ThumbnailCacheKey {
+                local_path,
+                size,
+                crop_to_center,
+            },
+            b.clone(),
+        );
         Ok(b)
     }
 }
 
-fn make_thumbnail(local_path: impl AsRef<Path>, size: u32, quality: u8) -> super::Result<Bytes> {
+fn make_thumbnail(
+    local_path: impl AsRef<Path>,
+    size: u32,
+    quality: u8,
+    target_ratio: Option<f32>,
+) -> super::Result<Bytes> {
     let t = Instant::now();
     let mut img = image::io::Reader::open(&local_path)
         .with_status(StatusCode::NOT_FOUND)?
@@ -81,14 +100,18 @@ fn make_thumbnail(local_path: impl AsRef<Path>, size: u32, quality: u8) -> super
         .with_interal()?;
     let (w, h) = img.dimensions();
     if w > size || h > size {
-        let wdh = (w as f64) / (h as f64);
-        img = if wdh < 0.75 {
-            img.resize_to_fill(size / 4 * 3, size, Lanczos3)
-        } else if wdh > 1.33 {
-            img.resize_to_fill(size, size / 4 * 3, Lanczos3)
+        img = if let Some(target_ratio) = target_ratio {
+            let wdh = (w as f32) / (h as f32);
+            if wdh < target_ratio {
+                img.resize_to_fill((size as f32 * target_ratio) as u32, size, Lanczos3)
+            } else if wdh > (1.0 / target_ratio) {
+                img.resize_to_fill(size, (size as f32 * target_ratio) as u32, Lanczos3)
+            } else {
+                img.resize(size, size, Lanczos3)
+            }
         } else {
             img.resize(size, size, Lanczos3)
-        };
+        }
     }
     let mut b = Cursor::new(Vec::with_capacity(1024 * 50));
     img.write_to(&mut b, ImageOutputFormat::Jpeg(quality))

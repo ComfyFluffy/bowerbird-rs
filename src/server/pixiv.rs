@@ -36,6 +36,7 @@ use super::{error::*, PixivConfig, Result};
 #[derive(Debug, Clone, Deserialize)]
 struct ThumbnailQuery {
     size: u32,
+    crop_to_center: bool,
 }
 #[get("/thumbnail/{path:.*}")]
 async fn thumbnail(
@@ -50,9 +51,6 @@ async fn thumbnail(
     if req.headers().get(header::RANGE).is_some() {
         return Ok(HttpResponse::NotImplemented().finish());
     }
-    if query.size > 1024 {
-        return Err(Error::with_msg(StatusCode::BAD_REQUEST, "size too large"));
-    }
     let path = pixiv_config
         .storage_dir
         .join(path.0.replace("../", "").replace("..\\", ""));
@@ -63,6 +61,7 @@ async fn thumbnail(
         cache.as_ref(),
         semaphore.as_ref(),
         config.server.thumbnail_jpeg_quality,
+        query.crop_to_center,
     )
     .await?;
 
@@ -75,7 +74,8 @@ async fn thumbnail(
 async fn media_redirect(
     db: &Database,
     filter: Document,
-    size: Option<u32>,
+    to_thumbnail: bool,
+    query: &str,
 ) -> Result<HttpResponse> {
     if let Some(r) = db
         .collection::<Document>("pixiv_image")
@@ -89,8 +89,8 @@ async fn media_redirect(
         .with_interal()?
     {
         let path = r.get_str("local_path").with_interal()?;
-        let url = if let Some(size) = size {
-            format!("thumbnail/{path}?size={size}")
+        let url = if to_thumbnail {
+            format!("thumbnail/{path}?{query}")
         } else {
             format!("storage/{path}")
         };
@@ -111,8 +111,15 @@ struct MediaByUrlQuery {
 async fn media_by_url(
     query: web::Query<MediaByUrlQuery>,
     db: Data<Database>,
+    req: HttpRequest,
 ) -> Result<HttpResponse> {
-    media_redirect(db.as_ref(), doc! { "url": &query.url }, query.size).await
+    media_redirect(
+        db.as_ref(),
+        doc! { "url": &query.url },
+        query.size.is_some(),
+        req.query_string(),
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Deserialize)]
