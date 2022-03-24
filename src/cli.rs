@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use bson::to_bson;
 use clap::Parser;
@@ -275,14 +275,12 @@ async fn run_internal() -> crate::Result<()> {
     Ok(())
 }
 
-pub async fn run() {
-    match run_internal().await {
-        Err(e) => {
-            error!("{}", e);
-            process::exit(1);
-        }
-        _ => {
-            process::exit(0);
-        }
-    };
+/// Run the app and return the exit code.
+pub async fn run() -> i32 {
+    if let Err(e) = run_internal().await {
+        error!("{}", e);
+        1
+    } else {
+        0
+    }
 }

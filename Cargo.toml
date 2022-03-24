@@ -20,7 +20,7 @@ color-thief = "0.2"
 image = "0.24"
 regex = "1"
 pixivcrab = { path = "../pixivcrab" }
-aria2-ws = { path = "../aria2-ws-rs" }
+aria2-ws = "0.2"
 clap = { version = "3", features = ["derive"] }
 dirs = "4"
 serde_json = "1"

@@ -1,3 +1,5 @@
+use std::process;
+
 #[tokio::main]
 async fn main() {
     std::env::set_var("RUST_LOG", "debug");
@@ -9,5 +11,5 @@ async fn main() {
     //     .unwrap();
     // agent.start();
 
-    bowerbird::cli::run().await;
+    process::exit(bowerbird::cli::run().await);
 }

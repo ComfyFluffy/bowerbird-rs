@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use log::debug;
@@ -19,7 +20,7 @@ use actix_web::{
     web::{self, Data, Json},
     HttpRequest, HttpResponse,
 };
-use bson::{doc, oid::ObjectId, to_document, DateTime, Document, Regex};
+use bson::{doc, oid::ObjectId, to_document, Document, Regex};
 
 use tokio::sync::Semaphore;
 
@@ -185,7 +186,7 @@ struct FindIllustForm {
     tags_or: Option<bool>,
     tags: Option<Vec<ObjectId>>,
     search: Option<String>, // Search in title and caption
-    date_range: Option<(Option<DateTime>, Option<DateTime>)>,
+    date_range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
     bookmarks_range: Option<(u32, u32)>,
     sort_by: Option<IndexMap<String, i32>>,
     source_inaccessible: Option<bool>,
