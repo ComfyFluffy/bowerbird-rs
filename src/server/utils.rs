@@ -75,19 +75,21 @@ pub async fn cached_image_thumbnail(
 
 fn make_thumbnail(local_path: impl AsRef<Path>, size: u32, quality: u8) -> super::Result<Bytes> {
     let t = Instant::now();
-    let img = image::io::Reader::open(&local_path)
+    let mut img = image::io::Reader::open(&local_path)
         .with_status(StatusCode::NOT_FOUND)?
         .decode()
         .with_interal()?;
     let (w, h) = img.dimensions();
-    let wdh = (w as f64) / (h as f64);
-    let img = if wdh < 0.75 {
-        img.resize_to_fill(size / 4 * 3, size, Lanczos3)
-    } else if wdh > 1.33 {
-        img.resize_to_fill(size, size / 4 * 3, Lanczos3)
-    } else {
-        img.resize(size, size, Lanczos3)
-    };
+    if w > size || h > size {
+        let wdh = (w as f64) / (h as f64);
+        img = if wdh < 0.75 {
+            img.resize_to_fill(size / 4 * 3, size, Lanczos3)
+        } else if wdh > 1.33 {
+            img.resize_to_fill(size, size / 4 * 3, Lanczos3)
+        } else {
+            img.resize(size, size, Lanczos3)
+        };
+    }
     let mut b = Cursor::new(Vec::with_capacity(1024 * 50));
     img.write_to(&mut b, ImageOutputFormat::Jpeg(quality))
         .with_interal()?;
