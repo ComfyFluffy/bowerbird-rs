@@ -1,9 +1,10 @@
-mod aria2;
 use futures::future::BoxFuture;
+
+use crate::error::BoxError;
 
 pub use aria2::Aria2Downloader;
 
-use crate::error::BoxError;
+mod aria2;
 
 pub struct Task {
     pub url: String,

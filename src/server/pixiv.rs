@@ -1,15 +1,5 @@
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
-use futures::TryStreamExt;
-use indexmap::IndexMap;
-use log::debug;
-use mongodb::{
-    options::{FindOneOptions, FindOptions},
-    Database,
-};
-use serde::Deserialize;
-
 use actix_web::{
     get,
     http::{
@@ -20,18 +10,53 @@ use actix_web::{
     web::{self, Data, Json},
     HttpRequest, HttpResponse,
 };
-use bson::{doc, oid::ObjectId, to_document, Document, Regex};
-
+use bson::{doc, oid::ObjectId, to_document, Document};
+use chrono::{DateTime, Utc};
+use futures::TryStreamExt;
+use indexmap::IndexMap;
+use log::debug;
+use mongodb::{
+    options::{FindOneOptions, FindOptions},
+    Database,
+};
+use serde::Deserialize;
 use tokio::sync::Semaphore;
 
+use super::{
+    error::*,
+    utils::{build_search_regex, cached_image_thumbnail, ThumbnailCache},
+    PixivConfig, Result,
+};
 use crate::{
     config::Config,
-    model::{pixiv::PixivIllust, ImageMedia, LocalMedia, Tag},
+    model::{
+        pixiv::{PixivIllust, PixivUser},
+        ImageMedia, LocalMedia, Tag,
+    },
 };
 
-use super::utils;
+type SortBy = IndexMap<String, i32>;
 
-use super::{error::*, PixivConfig, Result};
+fn parse_sort_by(sort_by: Option<SortBy>) -> Document {
+    sort_by.map_or(doc! {"_id": -1}, |s| to_document(&s).unwrap())
+}
+
+fn sort_by_guard(sort_by: &Option<SortBy>) -> Result<()> {
+    if let Some(sort_by) = sort_by {
+        for (_, v) in sort_by {
+            match *v {
+                1 | -1 => {}
+                _ => {
+                    return Err(Error::with_msg(
+                        StatusCode::BAD_REQUEST,
+                        "sort_by value must be 1 or -1",
+                    ))
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Deserialize)]
 struct ThumbnailQuery {
@@ -45,7 +70,7 @@ async fn thumbnail(
     query: web::Query<ThumbnailQuery>,
     config: Data<Config>,
     pixiv_config: Data<PixivConfig>,
-    cache: Data<Mutex<utils::ThumbnailCache>>,
+    cache: Data<Mutex<ThumbnailCache>>,
     semaphore: Data<Semaphore>,
 ) -> Result<HttpResponse> {
     if req.headers().get(header::RANGE).is_some() {
@@ -55,13 +80,17 @@ async fn thumbnail(
         .storage_dir
         .join(path.0.replace("../", "").replace("..\\", ""));
 
-    let img = utils::cached_image_thumbnail(
+    let img = cached_image_thumbnail(
         path,
         query.size,
         cache.as_ref(),
         semaphore.as_ref(),
         config.server.thumbnail_jpeg_quality,
-        query.crop_to_center,
+        if query.crop_to_center {
+            Some(0.75)
+        } else {
+            None
+        },
     )
     .await?;
 
@@ -152,7 +181,7 @@ async fn find_image_media(
     }
 
     let cur = db
-        .collection::<LocalMedia<ImageMedia>>("pixiv_image")
+        .collection("pixiv_image")
         .find(m, FindOptions::builder().sort(doc! {"_id": -1}).build())
         .await
         .with_interal()?;
@@ -162,25 +191,84 @@ async fn find_image_media(
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct FindUserForm {
+    search: Option<String>,
+    ids: Option<Vec<ObjectId>>,
+    source_ids: Option<Vec<String>>,
+    source_inaccessible: Option<bool>,
+    tag_ids: Option<Vec<ObjectId>>,
+    // limit: u32,
+    sort_by: Option<SortBy>,
+}
+#[post("/find/user")]
+async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<Vec<PixivUser>>> {
+    let form = form.into_inner();
+    sort_by_guard(&form.sort_by)?;
+    let mut filter = doc! {};
+    if let Some(search) = form.search {
+        let reg = build_search_regex(&search);
+        filter.extend(doc! {
+            "$or": [
+                { "history.extension.name": &reg },
+                { "history.extension.comment": &reg },
+            ]
+        });
+    }
+    if let Some(ids) = form.ids {
+        filter.extend(doc! { "_id": {"$in": ids} });
+    }
+    if let Some(source_ids) = form.source_ids {
+        filter.extend(doc! { "source_id": {"$in": source_ids} });
+    }
+    if let Some(source_inaccessible) = form.source_inaccessible {
+        filter.extend(doc! { "source_inaccessible": source_inaccessible });
+    }
+    if let Some(tag_ids) = form.tag_ids {
+        filter.extend(doc! { "tag_ids": {"$in": tag_ids} });
+    }
+
+    let rv = db
+        .collection("pixiv_user")
+        .find(
+            filter,
+            FindOptions::builder()
+                .sort(parse_sort_by(form.sort_by))
+                // .limit(form.limit as i64)
+                .build(),
+        )
+        .await
+        .with_interal()?
+        .try_collect()
+        .await
+        .with_interal()?;
+    Ok(Json(rv))
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct FindTagForm {
-    search: String,
+    search: Option<String>,
+    ids: Option<Vec<ObjectId>>,
     limit: u32,
 }
 #[post("/find/tag")]
 async fn find_tag(db: Data<Database>, form: Json<FindTagForm>) -> Result<Json<Vec<Tag>>> {
-    let f = if form.search.is_empty() {
-        None
-    } else {
-        let reg = Regex {
-            pattern: regex::escape(&form.search),
-            options: "i".to_string(),
-        };
-        Some(doc! {"alias": reg})
-    };
+    let form = form.into_inner();
+    let mut filter = doc! {};
+    if let Some(search) = form.search {
+        if !search.is_empty() {
+            filter.extend(doc! {"alias": build_search_regex(&search)});
+        }
+    }
+    if let Some(ids) = form.ids {
+        filter.extend(doc! {"_id": {"$in": ids}});
+    }
 
     let cur = db
         .collection::<Tag>("pixiv_tag")
-        .find(f, FindOptions::builder().limit(form.limit as i64).build())
+        .find(
+            filter,
+            FindOptions::builder().limit(form.limit as i64).build(),
+        )
         .await
         .with_interal()?;
 
@@ -190,12 +278,11 @@ async fn find_tag(db: Data<Database>, form: Json<FindTagForm>) -> Result<Json<Ve
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct FindIllustForm {
-    tags_or: Option<bool>,
     tags: Option<Vec<ObjectId>>,
     search: Option<String>, // Search in title and caption
     date_range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
     bookmarks_range: Option<(u32, u32)>,
-    sort_by: Option<IndexMap<String, i32>>,
+    sort_by: Option<SortBy>,
     source_inaccessible: Option<bool>,
     parent_ids: Option<Vec<ObjectId>>,
 }
@@ -205,25 +292,21 @@ async fn find_illust(
     form: Json<FindIllustForm>,
 ) -> Result<Json<Vec<PixivIllust>>> {
     let form = form.into_inner();
-    let mut m = Document::new();
+
+    sort_by_guard(&form.sort_by)?;
+
+    let mut filter = doc! {};
 
     if let Some(tag_ids) = form.tags {
         if !tag_ids.is_empty() {
-            if form.tags_or.unwrap_or_default() {
-                m.extend(doc! { "tag_ids": {"$in": tag_ids} });
-            } else {
-                m.extend(doc! { "tag_ids": {"$all": tag_ids} });
-            }
+            filter.extend(doc! { "tag_ids": {"$all": tag_ids} });
         }
     }
 
     if let Some(search) = form.search {
         if !search.is_empty() {
-            let reg = Regex {
-                pattern: search,
-                options: "i".to_string(),
-            };
-            m.extend(doc! { "$or": [
+            let reg = build_search_regex(&search);
+            filter.extend(doc! { "$or": [
                 { "history.extension.title": &reg },
                 { "history.extension.caption_html": &reg },
             ]});
@@ -231,53 +314,39 @@ async fn find_illust(
     }
 
     if let Some((start, end)) = form.date_range {
-        let mut m_date = Document::new();
+        let mut filter_date = Document::new();
         if let Some(start) = start {
-            m_date.insert("$gte", start);
+            filter_date.insert("$gte", start);
         }
         if let Some(end) = end {
-            m_date.insert("$lte", end);
+            filter_date.insert("$lte", end);
         }
-        if m_date.len() > 0 {
-            m.extend(doc! { "history.extension.date": m_date });
+        if filter_date.len() > 0 {
+            filter.extend(doc! { "history.extension.date": filter_date });
         }
     }
 
     if let Some((min_bookmarks, max_bookmarks)) = form.bookmarks_range {
         if min_bookmarks != 0 || max_bookmarks != 0 {
             if max_bookmarks != 0 {
-                m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks, "$lte": max_bookmarks} });
+                filter.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks, "$lte": max_bookmarks} });
             } else {
-                m.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks} });
+                filter.extend(doc! { "history.extension.bookmarks": {"$gte": min_bookmarks} });
             }
         }
     }
 
     if let Some(source_inaccessible) = form.source_inaccessible {
-        m.insert("source_inaccessible", source_inaccessible);
+        filter.extend(doc! {"source_inaccessible": source_inaccessible});
     }
 
     if let Some(parent_ids) = form.parent_ids {
         if !parent_ids.is_empty() {
-            m.extend(doc! { "parent_id": {"$in": parent_ids} });
+            filter.extend(doc! { "parent_id": {"$in": parent_ids} });
         }
     }
 
-    debug!("Find illust: {:?}", m);
-
-    if let Some(ref sort_by) = form.sort_by {
-        for (_, v) in sort_by {
-            match *v {
-                1 | -1 => {}
-                _ => {
-                    return Err(Error::with_msg(
-                        StatusCode::BAD_REQUEST,
-                        "sort_by value must be 1 or -1",
-                    ))
-                }
-            }
-        }
-    }
+    debug!("find illust: {:?} sort: {:?}", filter, form.sort_by);
 
     let options = FindOptions::builder()
         .sort(
@@ -286,11 +355,13 @@ async fn find_illust(
         )
         .build();
 
-    let cur = db
-        .collection::<PixivIllust>("pixiv_illust")
-        .find(m, options)
+    let rv = db
+        .collection("pixiv_illust")
+        .find(filter, options)
+        .await
+        .with_interal()?
+        .try_collect()
         .await
         .with_interal()?;
-    let rv = cur.try_collect().await.with_interal()?;
     Ok(Json(rv))
 }

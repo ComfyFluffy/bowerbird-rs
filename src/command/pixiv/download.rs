@@ -1,26 +1,22 @@
 use aria2_ws::TaskOptions;
 use futures::FutureExt;
 use lazy_static::lazy_static;
+use log::warn;
+use mongodb::{
+    bson::{doc, Document},
+    Collection,
+};
+use path_slash::PathBufExt;
 use regex::Regex;
-
 use std::{collections::HashMap, path::PathBuf};
 use tokio::task::spawn_blocking;
 
+use super::{utils, TaskConfig};
 use crate::{
     downloader::{Aria2Downloader, Task, TaskHooks},
     error::{self, BoxError},
 };
 
-use log::warn;
-
-use mongodb::{
-    bson::{doc, Document},
-    Collection,
-};
-
-use path_slash::PathBufExt;
-
-use super::{utils, TaskConfig};
 lazy_static! {
     /// Match the pximg URL.
     ///

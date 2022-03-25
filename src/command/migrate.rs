@@ -1,14 +1,15 @@
-use crate::{
-    error,
-    model::{BowerbirdMetadata, Hsv, LocalMedia},
-    utils::rgb_to_hsv,
-};
 use bson::{doc, to_bson};
 use futures::TryStreamExt;
 use log::info;
 use mongodb::Database;
 use serde::Deserialize;
 use snafu::ResultExt;
+
+use crate::{
+    error,
+    model::{BowerbirdMetadata, Hsv, LocalMedia},
+    utils::rgb_to_hsv,
+};
 
 pub const DB_VERSION: i32 = 2;
 

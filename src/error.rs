@@ -1,6 +1,6 @@
+use snafu::Snafu;
 use std::process::ExitStatus;
 
-use snafu::Snafu;
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Snafu, Debug)]

@@ -1,3 +1,8 @@
+use actix_web::http::StatusCode;
+use bson::Regex;
+use bytes::Bytes;
+use image::{imageops::FilterType::Lanczos3, GenericImageView, ImageOutputFormat};
+use log::debug;
 use std::{
     collections::HashMap,
     io::Cursor,
@@ -5,12 +10,6 @@ use std::{
     sync::Mutex,
     time::Instant,
 };
-
-use actix_web::http::StatusCode;
-use bytes::Bytes;
-use image::{imageops::FilterType::Lanczos3, GenericImageView, ImageOutputFormat};
-
-use log::debug;
 use tokio::{sync::Semaphore, task::spawn_blocking};
 
 use crate::server::error::ServerErrorExt;
@@ -19,7 +18,7 @@ use crate::server::error::ServerErrorExt;
 pub struct ThumbnailCacheKey {
     size: u32,
     local_path: PathBuf,
-    crop_to_center: bool,
+    target_ratio: Option<u32>,
 }
 
 pub type ThumbnailCache = HashMap<ThumbnailCacheKey, Bytes>;
@@ -44,7 +43,7 @@ pub async fn cached_image_thumbnail(
     cache: &Mutex<ThumbnailCache>,
     semaphore: &Semaphore,
     quality: u8,
-    crop_to_center: bool,
+    target_ratio: Option<f32>,
 ) -> super::Result<Bytes> {
     let mut cache_lock = cache.lock().unwrap();
     if cache_lock.len() > 500 {
@@ -53,10 +52,11 @@ pub async fn cached_image_thumbnail(
     }
 
     let local_path = local_path.as_ref().to_path_buf();
+    let target_ratio_u32 = target_ratio.map(|t| (t * 100.0) as u32);
     if let Some(b) = cache_lock.get(&ThumbnailCacheKey {
         local_path: local_path.clone(),
         size,
-        crop_to_center,
+        target_ratio: target_ratio_u32,
     }) {
         Ok(b.clone())
     } else {
@@ -64,14 +64,7 @@ pub async fn cached_image_thumbnail(
 
         let b = spawn_semaphore(semaphore, {
             let local_path = local_path.clone();
-            move || {
-                make_thumbnail(
-                    local_path,
-                    size,
-                    quality,
-                    if crop_to_center { Some(0.75) } else { None },
-                )
-            }
+            move || make_thumbnail(local_path, size, quality, target_ratio)
         })
         .await?;
 
@@ -79,7 +72,7 @@ pub async fn cached_image_thumbnail(
             ThumbnailCacheKey {
                 local_path,
                 size,
-                crop_to_center,
+                target_ratio: target_ratio_u32,
             },
             b.clone(),
         );
@@ -124,4 +117,11 @@ fn make_thumbnail(
         t.elapsed()
     );
     Ok(Bytes::from(b))
+}
+
+pub fn build_search_regex(search: &str) -> Regex {
+    Regex {
+        pattern: regex::escape(search),
+        options: "i".to_string(),
+    }
 }

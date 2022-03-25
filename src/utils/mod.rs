@@ -1,7 +1,8 @@
-mod waitgroup;
-pub use waitgroup::WaitGroup;
-
 use std::net::TcpListener;
+
+mod waitgroup;
+
+pub use waitgroup::WaitGroup;
 
 pub fn get_available_port<T>(ra: T) -> Option<u16>
 where

@@ -1,21 +1,20 @@
-use std::time::{Duration, Instant};
-
 use aria2_ws::Client;
 use futures::{future::BoxFuture, FutureExt};
 use log::{debug, warn};
-pub use reqwest::header::HeaderMap;
 use snafu::ResultExt;
+use std::time::{Duration, Instant};
 use tokio::{
     process::{Child, Command},
     time::timeout,
 };
 
+use super::Task;
 use crate::{
     error,
     utils::{get_available_port, WaitGroup},
 };
 
-use super::Task;
+pub use reqwest::header::HeaderMap;
 
 pub struct Aria2Downloader {
     client: Client,

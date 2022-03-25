@@ -1,7 +1,7 @@
-pub mod pixiv;
-
 use mongodb::bson::{oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
+
+pub mod pixiv;
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Item<E, H> {

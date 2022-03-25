@@ -1,3 +1,8 @@
+use image::GenericImageView;
+use log::warn;
+use pixivcrab::Pager;
+use serde::de::DeserializeOwned;
+use snafu::ResultExt;
 use std::{
     fmt::Debug,
     fs::File,
@@ -11,11 +16,6 @@ use crate::{
     model::Hsv,
     utils::rgb_to_hsv,
 };
-use image::GenericImageView;
-use log::warn;
-use pixivcrab::Pager;
-use serde::de::DeserializeOwned;
-use snafu::ResultExt;
 
 pub fn ugoira_to_mp4(
     ffmpeg_path: impl AsRef<Path>,

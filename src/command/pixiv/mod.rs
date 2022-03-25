@@ -1,10 +1,9 @@
+use mongodb::{bson::Document, Database};
 use pixivcrab::AppAPI;
 use std::{
     collections::{BTreeSet, HashMap},
     path::PathBuf,
 };
-
-use mongodb::{bson::Document, Database};
 
 use crate::downloader::Aria2Downloader;
 

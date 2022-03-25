@@ -1,10 +1,3 @@
-mod error;
-mod pixiv;
-mod utils;
-type Result<T> = std::result::Result<T, error::Error>;
-
-use std::{path::PathBuf, sync::Mutex};
-
 use actix_files::Files;
 use actix_web::{
     web::{self, Data},
@@ -13,11 +6,17 @@ use actix_web::{
 use log::info;
 use mongodb::Database;
 use snafu::ResultExt;
+use std::{path::PathBuf, sync::Mutex};
 use tokio::sync::Semaphore;
 
 use crate::config::Config;
-
 use utils::ThumbnailCache;
+
+mod error;
+mod pixiv;
+mod utils;
+
+type Result<T> = std::result::Result<T, error::Error>;
 
 #[derive(Debug, Clone)]
 struct PixivConfig {

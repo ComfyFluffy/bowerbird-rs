@@ -1,11 +1,9 @@
-use std::{path::PathBuf, time::Duration};
-
 use bson::to_bson;
 use clap::Parser;
-
 use log::{debug, error, warn};
 use mongodb::Database;
 use snafu::ResultExt;
+use std::{path::PathBuf, time::Duration};
 use tokio::{process::Command, time::timeout};
 
 use crate::{

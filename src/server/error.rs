@@ -1,8 +1,7 @@
-use std::fmt::{self, Debug, Display};
-
 use actix_web::http::StatusCode;
 use log::error;
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Debug, Display};
 
 use crate::error::BoxError;
 

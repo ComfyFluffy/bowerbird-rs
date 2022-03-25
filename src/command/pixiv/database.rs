@@ -1,8 +1,12 @@
 use chrono::{Duration, Utc};
+use log::{info, warn};
+use mongodb::{
+    bson::{doc, oid::ObjectId, to_bson, DateTime, Document},
+    options::{self, FindOneAndUpdateOptions, UpdateOptions},
+    Collection, Database, IndexModel,
+};
 use path_slash::PathBufExt;
 use pixivcrab::AppAPI;
-
-use log::{info, warn};
 use snafu::ResultExt;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -15,12 +19,6 @@ use crate::{
         pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
         History, Hsv, ImageMedia, LocalMedia,
     },
-};
-
-use mongodb::{
-    bson::{doc, oid::ObjectId, to_bson, DateTime, Document},
-    options::{self, FindOneAndUpdateOptions, UpdateOptions},
-    Collection, Database, IndexModel,
 };
 
 async fn update_users(

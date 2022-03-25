@@ -1,11 +1,10 @@
+use futures::{task::AtomicWaker, Future};
+use std::sync::atomic::Ordering::SeqCst;
 use std::{
     pin::Pin,
     sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll},
 };
-
-use futures::{task::AtomicWaker, Future};
-use std::sync::atomic::Ordering::SeqCst;
 
 #[derive(Debug)]
 struct WaitGroupInner {
