@@ -6,7 +6,7 @@ use mongodb::{
     Collection, Database, IndexModel,
 };
 use path_slash::PathBufExt;
-use pixivcrab::AppAPI;
+use pixivcrab::AppApi;
 use snafu::ResultExt;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -14,11 +14,14 @@ use std::{
 };
 
 use crate::{
+    command::pixiv::{download::download_other_images, TaskConfig},
+    downloader::Aria2Downloader,
     error::{self, BoxError},
     model::{
         pixiv::{self, NovelHistory, PixivIllust, PixivNovel, PixivUser, UserHistory},
         History, Hsv, ImageMedia, LocalMedia,
     },
+    utils::try_skip,
 };
 
 async fn update_users(
@@ -148,14 +151,19 @@ async fn set_item_invisible(c_item: &Collection<Document>, source_id: &str) -> c
 }
 
 pub async fn update_user_id_set(
-    api: &AppAPI,
+    api: &AppApi,
+    downloader: &Aria2Downloader,
     c_user: &Collection<Document>,
+    c_image: &Collection<Document>,
     users_need_update_set: BTreeSet<String>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let need_sleep = users_need_update_set.len() > 500;
     // Sleep for 1s to avoid 403 error
     for user_id in users_need_update_set {
-        update_user_detail(api, &user_id, c_user).await?;
+        try_skip!(
+            update_user_detail(api, downloader, &user_id, c_user, c_image, task_config).await
+        );
         if need_sleep {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
@@ -164,9 +172,12 @@ pub async fn update_user_id_set(
 }
 
 async fn update_user_detail(
-    api: &AppAPI,
+    api: &AppApi,
+    downloader: &Aria2Downloader,
     user_id: &str,
     c_user: &Collection<Document>,
+    c_image: &Collection<Document>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     info!("updating pixiv user {}", user_id);
     let resp = api.user_detail(&user_id).await.context(error::PixivApi)?;
@@ -250,6 +261,36 @@ async fn update_user_detail(
         )
         .await
         .context(error::MongoDb)?;
+
+    let ext = history.extension.unwrap();
+
+    if let Some(ref avatar_url) = ext.avatar_url {
+        download_other_images(downloader, c_image, avatar_url, "avatar", task_config).await?;
+    }
+    if let Some(ref background_url) = ext.background_url {
+        if !background_url.is_empty() {
+            download_other_images(
+                downloader,
+                c_image,
+                background_url,
+                "background",
+                task_config,
+            )
+            .await?;
+        }
+    }
+    if let Some(ref workspace_image_url) = ext.workspace_image_url {
+        if !workspace_image_url.is_empty() {
+            download_other_images(
+                downloader,
+                c_image,
+                workspace_image_url,
+                "workspace",
+                task_config,
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -343,7 +384,7 @@ pub async fn save_image_ugoira(
 
 pub async fn save_illusts(
     illusts: &Vec<pixivcrab::models::illust::Illust>,
-    api: &AppAPI,
+    api: &AppApi,
     c_tag: &Collection<Document>,
     c_user: &Collection<Document>,
     c_illust: &Collection<Document>,
@@ -467,7 +508,7 @@ pub async fn save_illusts(
 
 pub async fn save_novels(
     novels: Vec<pixivcrab::models::novel::Novel>,
-    api: &AppAPI,
+    api: &AppApi,
     c_user: &Collection<Document>,
     c_tag: &Collection<Document>,
     c_novel: &Collection<Document>,

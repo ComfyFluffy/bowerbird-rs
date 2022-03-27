@@ -1,5 +1,5 @@
 use mongodb::{bson::Document, Database};
-use pixivcrab::AppAPI;
+use pixivcrab::AppApi;
 use std::{
     collections::{BTreeSet, HashMap},
     path::PathBuf,
@@ -31,9 +31,9 @@ pub struct TaskConfig {
 
 async fn illusts(
     db: &Database,
-    api: &AppAPI,
+    api: &AppApi,
     downloader: &Aria2Downloader,
-    mut pager: pixivcrab::Pager<'_, pixivcrab::models::illust::Response>,
+    mut pager: pixivcrab::Pager<pixivcrab::models::illust::Response>,
     limit: Option<u32>,
     task_config: &TaskConfig,
 ) -> crate::Result<()> {
@@ -72,13 +72,21 @@ async fn illusts(
         }
     }
 
-    database::update_user_id_set(api, &c_user, users_need_update_set).await?;
+    database::update_user_id_set(
+        api,
+        downloader,
+        &c_user,
+        &c_image,
+        users_need_update_set,
+        task_config,
+    )
+    .await?;
 
     Ok(())
 }
 
 pub async fn illust_uploads(
-    api: &pixivcrab::AppAPI,
+    api: &pixivcrab::AppApi,
     db: &mongodb::Database,
     downloader: &Aria2Downloader,
     user_id: &str,
@@ -91,7 +99,7 @@ pub async fn illust_uploads(
 }
 
 pub async fn illust_bookmarks(
-    api: &pixivcrab::AppAPI,
+    api: &pixivcrab::AppApi,
     db: &mongodb::Database,
     downloader: &Aria2Downloader,
     user_id: &str,
@@ -105,11 +113,13 @@ pub async fn illust_bookmarks(
 }
 
 async fn novels<'a>(
-    mut pager: pixivcrab::Pager<'a, pixivcrab::models::novel::Response>,
     db: &Database,
-    api: &AppAPI,
+    api: &AppApi,
+    downloader: &Aria2Downloader,
+    mut pager: pixivcrab::Pager<pixivcrab::models::novel::Response>,
     limit: Option<u32>,
     update_exists: bool,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let mut users_need_update_set = BTreeSet::new();
     let mut items_sent = 0;
@@ -117,6 +127,7 @@ async fn novels<'a>(
     let c_user = db.collection::<Document>("pixiv_user");
     let c_tag = db.collection::<Document>("pixiv_tag");
     let c_novel = db.collection::<Document>("pixiv_novel");
+    let c_image = db.collection::<Document>("pixiv_image");
 
     while let Some(r) = utils::retry_pager(&mut pager, 3).await? {
         database::save_novels(
@@ -136,32 +147,60 @@ async fn novels<'a>(
         }
     }
 
-    database::update_user_id_set(api, &c_user, users_need_update_set).await?;
+    database::update_user_id_set(
+        api,
+        downloader,
+        &c_user,
+        &c_image,
+        users_need_update_set,
+        task_config,
+    )
+    .await?;
 
     Ok(())
 }
 
 pub async fn novel_bookmarks(
-    api: &pixivcrab::AppAPI,
+    api: &pixivcrab::AppApi,
     db: &mongodb::Database,
+    downloader: &Aria2Downloader,
     update_exists: bool,
     user_id: &str,
     private: bool,
     limit: Option<u32>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let pager = api.novel_bookmarks(user_id, private);
-
-    novels(pager, db, api, limit, update_exists).await
+    novels(
+        db,
+        api,
+        downloader,
+        pager,
+        limit,
+        update_exists,
+        task_config,
+    )
+    .await
 }
 
 pub async fn novel_uploads(
-    api: &pixivcrab::AppAPI,
+    api: &pixivcrab::AppApi,
     db: &mongodb::Database,
+    downloader: &Aria2Downloader,
     update_exists: bool,
     user_id: &str,
     limit: Option<u32>,
+    task_config: &TaskConfig,
 ) -> crate::Result<()> {
     let pager = api.novel_uploads(user_id);
-
-    novels(pager, db, api, limit, update_exists).await
+    novels(
+        db,
+        api,
+        downloader,
+        pager,
+        limit,
+        update_exists,
+        task_config,
+    )
+    .await
 }

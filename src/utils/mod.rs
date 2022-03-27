@@ -56,3 +56,16 @@ mod tests {
         // assert_eq!(super::rgb_to_hsv(108, 52, 62), (347.0, 0.52, 0.42));
     }
 }
+
+macro_rules! try_skip {
+    ($res:expr) => {
+        match $res {
+            Ok(val) => val,
+            Err(e) => {
+                warn!("{}", e);
+                continue;
+            }
+        }
+    };
+}
+pub(crate) use try_skip;

@@ -6,15 +6,21 @@ use mongodb::{
     bson::{doc, Document},
     Collection,
 };
-use path_slash::PathBufExt;
-use regex::Regex;
-use std::{collections::HashMap, path::PathBuf};
+
+use regex::{Captures, Regex};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use tokio::task::spawn_blocking;
 
-use super::{utils, TaskConfig};
+use super::{
+    utils::{self, filename_from_url},
+    TaskConfig,
+};
 use crate::{
     downloader::{Aria2Downloader, Task, TaskHooks},
-    error::{self, BoxError},
+    error::{self, BoxError}, utils::try_skip,
 };
 
 lazy_static! {
@@ -40,16 +46,23 @@ lazy_static! {
         Regex::new(r"/(\d{4}/\d{2}/\d{2}/\d{2}/\d{2}/\d{2})/((.*)\.(.*))$").unwrap();
 }
 
-macro_rules! try_skip {
-    ($res:expr) => {
-        match $res {
-            Ok(val) => val,
-            Err(e) => {
-                warn!("{}", e);
-                continue;
-            }
+fn get_captures(url: &str) -> crate::Result<Captures> {
+    RE_ILLUST_URL.captures(&url).ok_or(
+        error::PixivParse {
+            message: format!("cannot match url with regex: {url}"),
         }
-    };
+        .build(),
+    )
+}
+
+fn file_exists(path: impl AsRef<Path>) -> bool {
+    let path = path.as_ref();
+    if path.exists() {
+        let mut aria2_path = path.as_os_str().to_os_string();
+        aria2_path.push(".aria2");
+        return !PathBuf::from(aria2_path).exists();
+    }
+    false
 }
 
 async fn on_success_ugoira(
@@ -93,9 +106,50 @@ async fn on_success_illust(
     Ok(())
 }
 
+pub async fn download_other_images(
+    downloader: &Aria2Downloader,
+    c_image: &Collection<Document>,
+    url: &str,
+    parent_dir: &str,
+    task_config: &TaskConfig,
+) -> crate::Result<()> {
+    let filename = filename_from_url(&url)?;
+
+    let path_slash = format!("{parent_dir}/{filename}");
+    let path = task_config.parent_dir.join(&path_slash);
+
+    if file_exists(&path) {
+        return Ok(());
+    }
+
+    let task = Task {
+        hooks: Some(TaskHooks {
+            on_success: Some(
+                on_success_illust(
+                    url.to_string(),
+                    path.clone(),
+                    c_image.clone(),
+                    path_slash.clone(),
+                )
+                .boxed(),
+            ),
+            ..Default::default()
+        }),
+        options: Some(TaskOptions {
+            header: Some(vec!["Referer: https://app-api.pixiv.net/".to_string()]),
+            all_proxy: task_config.proxy.clone(),
+            out: Some(path_slash),
+            dir: Some(task_config.parent_dir.to_string_lossy().to_string()),
+            ..Default::default()
+        }),
+        url: url.to_string(),
+    };
+    downloader.add_task(task).await
+}
+
 async fn download_illust(
     downloader: &Aria2Downloader,
-    c_image: Collection<Document>,
+    c_image: &Collection<Document>,
     url: Option<String>,
     user_id: &str,
     illust_id: &str,
@@ -105,17 +159,12 @@ async fn download_illust(
 ) -> crate::Result<()> {
     let url = url.ok_or(
         error::PixivParse {
-            message: "empty url".to_string(),
+            message: format!("empty url for {}", illust_id),
         }
         .build(),
     )?;
 
-    let captures = RE_ILLUST_URL.captures(&url).ok_or(
-        error::PixivParse {
-            message: format!("cannot match url with RE_ILLUST_URL: {url}"),
-        }
-        .build(),
-    )?;
+    let captures = get_captures(&url)?;
     let date = captures.get(1).unwrap().as_str().replace("/", "");
 
     let path_slash = if is_multi_page {
@@ -127,16 +176,10 @@ async fn download_illust(
         format!("{user_id}/{id_page}_{date}.{ext}")
     };
 
-    let path = task_config
-        .parent_dir
-        .join(PathBuf::from_slash(&path_slash));
+    let path = task_config.parent_dir.join(&path_slash);
 
-    if path.exists() {
-        let mut aria2_path = path.clone().into_os_string();
-        aria2_path.push(".aria2");
-        if !PathBuf::from(aria2_path).exists() {
-            return Ok(());
-        }
+    if file_exists(&path) {
+        return Ok(());
     }
 
     let on_success_hook = if let Some(ugoira_frame_delay) = ugoira_frame_delay {
@@ -144,14 +187,20 @@ async fn download_illust(
         on_success_ugoira(
             url.clone(),
             path.clone(),
-            c_image,
+            c_image.clone(),
             path_slash.clone(),
             ugoira_frame_delay,
             task_config.ffmpeg_path.clone(),
         )
         .boxed()
     } else {
-        on_success_illust(url.clone(), path.clone(), c_image, path_slash.clone()).boxed()
+        on_success_illust(
+            url.clone(),
+            path.clone(),
+            c_image.clone(),
+            path_slash.clone(),
+        )
+        .boxed()
     };
 
     let task = Task {
@@ -197,7 +246,7 @@ pub async fn download_illusts(
                 let zip_url = zip_url.replace("600x600", "1920x1080");
                 if let Err(err) = download_illust(
                     downloader,
-                    c_image.clone(),
+                    c_image,
                     // get higher resolution images
                     Some(zip_url.clone()),
                     &i.user.id.to_string(),
@@ -217,7 +266,7 @@ pub async fn download_illusts(
             try_skip!(
                 download_illust(
                     downloader,
-                    c_image.clone(),
+                    c_image,
                     i.meta_single_page.original_image_url.clone(),
                     &i.user.id.to_string(),
                     &illust_id,
@@ -232,7 +281,7 @@ pub async fn download_illusts(
                 try_skip!(
                     download_illust(
                         downloader,
-                        c_image.clone(),
+                        c_image,
                         img.image_urls.original.clone(),
                         &i.user.id.to_string(),
                         &illust_id,

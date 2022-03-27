@@ -180,7 +180,7 @@ async fn run_internal() -> crate::Result<()> {
                     warn!("invalid certs will be accepted for pixiv api requests");
                     api_client = api_client.danger_accept_invalid_certs(true);
                 }
-                let api = pixivcrab::AppAPI::new(
+                let api = pixivcrab::AppApi::new(
                     AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
                     &config.pixiv.language,
                     api_client,
@@ -191,76 +191,75 @@ async fn run_internal() -> crate::Result<()> {
                 config.pixiv.refresh_token = auth_result.refresh_token;
                 config.save()?;
                 let selected_user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());
-                Ok((config, ffmpeg_path, db, api, selected_user_id))
+                let downloader =
+                    crate::downloader::Aria2Downloader::new(&config.aria2_path).await?;
+
+                let task_config = command::pixiv::TaskConfig {
+                    ffmpeg_path,
+                    parent_dir: config.sub_dir(&config.pixiv.storage_dir),
+                    proxy: config.pxoxy_string(&config.pixiv.proxy_download),
+                };
+                Ok((db, api, selected_user_id, downloader, task_config))
             };
             match &c.subcommand {
-                SubcommandPixiv::Illust(c) => {
-                    let pre_fn = async {
-                        let (config, ffmpeg_path, db, api, selected_user_id) = pre_fn.await?;
-                        let downloader =
-                            crate::downloader::Aria2Downloader::new(&config.aria2_path).await?;
-                        let task_config = command::pixiv::TaskConfig {
-                            ffmpeg_path,
-                            parent_dir: config.sub_dir(&config.pixiv.storage_dir),
-                            proxy: config.pxoxy_string(&config.pixiv.proxy_download),
-                        };
-                        Ok((db, api, selected_user_id, downloader, task_config))
-                    };
-                    match &c.subcommand {
-                        SubcommandPixivAction::Bookmarks(c) => {
-                            let (db, api, selected_user_id, downloader, task_config) =
-                                pre_fn.await?;
-                            command::pixiv::illust_bookmarks(
-                                &api,
-                                &db,
-                                &downloader,
-                                &selected_user_id,
-                                c.private,
-                                limit,
-                                &task_config,
-                            )
-                            .await?;
-                            downloader.wait_shutdown().await;
-                        }
-                        SubcommandPixivAction::Uploads => {
-                            let (db, api, selected_user_id, downloader, task_config) =
-                                pre_fn.await?;
-                            command::pixiv::illust_uploads(
-                                &api,
-                                &db,
-                                &downloader,
-                                &selected_user_id,
-                                limit,
-                                &task_config,
-                            )
-                            .await?;
-                            downloader.wait_shutdown().await;
-                        }
+                SubcommandPixiv::Illust(c) => match &c.subcommand {
+                    SubcommandPixivAction::Bookmarks(c) => {
+                        let (db, api, selected_user_id, downloader, task_config) = pre_fn.await?;
+                        command::pixiv::illust_bookmarks(
+                            &api,
+                            &db,
+                            &downloader,
+                            &selected_user_id,
+                            c.private,
+                            limit,
+                            &task_config,
+                        )
+                        .await?;
+                        downloader.wait_shutdown().await;
                     }
-                }
+                    SubcommandPixivAction::Uploads => {
+                        let (db, api, selected_user_id, downloader, task_config) = pre_fn.await?;
+                        command::pixiv::illust_uploads(
+                            &api,
+                            &db,
+                            &downloader,
+                            &selected_user_id,
+                            limit,
+                            &task_config,
+                        )
+                        .await?;
+                        downloader.wait_shutdown().await;
+                    }
+                },
                 SubcommandPixiv::Novel(c) => {
                     let update_exists = c.update_exists;
                     match &c.subcommand {
                         SubcommandPixivAction::Bookmarks(c) => {
-                            let (_, _, db, api, selected_user_id) = pre_fn.await?;
+                            let (db, api, selected_user_id, downloader, task_config) =
+                                pre_fn.await?;
                             command::pixiv::novel_bookmarks(
                                 &api,
                                 &db,
+                                &downloader,
                                 update_exists,
                                 &selected_user_id,
                                 c.private,
                                 limit,
+                                &task_config,
                             )
                             .await?;
                         }
                         SubcommandPixivAction::Uploads => {
-                            let (_, _, db, api, selected_user_id) = pre_fn.await?;
+                            let (db, api, selected_user_id, downloader, task_config) =
+                                pre_fn.await?;
                             command::pixiv::novel_uploads(
                                 &api,
                                 &db,
+                                &downloader,
                                 update_exists,
                                 &selected_user_id,
                                 limit,
+                                &task_config,
                             )
                             .await?;
                         }

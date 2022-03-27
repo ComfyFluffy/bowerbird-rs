@@ -42,6 +42,7 @@ pub async fn run(db: Database, config: Config) -> crate::Result<()> {
                 .service(pixiv::find_illust)
                 .service(pixiv::find_tag)
                 .service(pixiv::media_by_url)
+                .service(pixiv::find_user)
                 .service(pixiv::find_image_media);
 
             let scope_v1 = web::scope("/api/v1").service(scope_pixiv);

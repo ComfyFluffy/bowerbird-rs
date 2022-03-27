@@ -1,15 +1,16 @@
+use futures::TryStreamExt;
 use image::GenericImageView;
 use log::warn;
 use pixivcrab::Pager;
 use serde::de::DeserializeOwned;
 use snafu::ResultExt;
 use std::{
-    fmt::Debug,
     fs::File,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::Duration,
 };
+use url::Url;
 
 use crate::{
     error::{self, BoxError},
@@ -96,17 +97,14 @@ pub fn get_palette(image_path: impl AsRef<Path>) -> Result<((i32, i32), Vec<Hsv>
     Ok(((w as i32, h as i32), hsv_v))
 }
 
-pub async fn retry_pager<'a, T>(
-    pager: &mut Pager<'a, T>,
-    max_tries: i32,
-) -> crate::Result<Option<T>>
+pub async fn retry_pager<T>(pager: &mut Pager<T>, max_tries: i32) -> crate::Result<Option<T>>
 where
-    T: DeserializeOwned + pixivcrab::NextUrl + Debug,
+    T: DeserializeOwned + pixivcrab::NextUrl + Send,
 {
     let mut tries = 0;
     loop {
         tries += 1;
-        match pager.next().await.context(error::PixivApi) {
+        match pager.try_next().await.context(error::PixivApi) {
             Ok(r) => {
                 return Ok(r);
             }
@@ -123,5 +121,19 @@ where
                 return Err(e);
             }
         }
+    }
+}
+
+fn filename_from_url_ok(url: &str) -> Option<String> {
+    Some(Url::parse(url).ok()?.path_segments()?.last()?.to_string())
+}
+
+pub fn filename_from_url(url: &str) -> crate::Result<String> {
+    match filename_from_url_ok(url) {
+        Some(filename) => Ok(filename),
+        None => Err(error::PixivParse {
+            message: format!("Cannot parse filename from url: {}", url),
+        }
+        .build()),
     }
 }

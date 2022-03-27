@@ -203,8 +203,11 @@ struct FindUserForm {
 #[post("/find/user")]
 async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<Vec<PixivUser>>> {
     let form = form.into_inner();
+
     sort_by_guard(&form.sort_by)?;
+
     let mut filter = doc! {};
+
     if let Some(search) = form.search {
         let reg = build_search_regex(&search);
         filter.extend(doc! {
@@ -214,17 +217,25 @@ async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<
             ]
         });
     }
+
     if let Some(ids) = form.ids {
         filter.extend(doc! { "_id": {"$in": ids} });
     }
+
     if let Some(source_ids) = form.source_ids {
-        filter.extend(doc! { "source_id": {"$in": source_ids} });
+        if !source_ids.is_empty() {
+            filter.extend(doc! { "source_id": {"$in": source_ids} });
+        }
     }
+
     if let Some(source_inaccessible) = form.source_inaccessible {
         filter.extend(doc! { "source_inaccessible": source_inaccessible });
     }
+
     if let Some(tag_ids) = form.tag_ids {
-        filter.extend(doc! { "tag_ids": {"$in": tag_ids} });
+        if !tag_ids.is_empty() {
+            filter.extend(doc! { "tag_ids": {"$all": tag_ids} });
+        }
     }
 
     let rv = db
