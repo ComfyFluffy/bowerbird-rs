@@ -197,7 +197,7 @@ struct FindUserForm {
     source_ids: Option<Vec<String>>,
     source_inaccessible: Option<bool>,
     tag_ids: Option<Vec<ObjectId>>,
-    // limit: u32,
+    limit: u32,
     sort_by: Option<SortBy>,
 }
 #[post("/find/user")]
@@ -210,12 +210,7 @@ async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<
 
     if let Some(search) = form.search {
         let reg = build_search_regex(&search);
-        filter.extend(doc! {
-            "$or": [
-                { "history.extension.name": &reg },
-                { "history.extension.comment": &reg },
-            ]
-        });
+        filter.extend(doc! { "history.extension.name": &reg });
     }
 
     if let Some(ids) = form.ids {
@@ -244,7 +239,7 @@ async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<
             filter,
             FindOptions::builder()
                 .sort(parse_sort_by(form.sort_by))
-                // .limit(form.limit as i64)
+                .limit(form.limit as i64)
                 .build(),
         )
         .await
