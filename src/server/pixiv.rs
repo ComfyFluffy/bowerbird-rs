@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use actix_web::{
     get,
     http::{
@@ -20,6 +18,7 @@ use mongodb::{
     Database,
 };
 use serde::Deserialize;
+use std::sync::Mutex;
 use tokio::sync::Semaphore;
 
 use super::{
@@ -197,8 +196,9 @@ struct FindUserForm {
     source_ids: Option<Vec<String>>,
     source_inaccessible: Option<bool>,
     tag_ids: Option<Vec<ObjectId>>,
-    limit: u32,
     sort_by: Option<SortBy>,
+    skip: u32,
+    limit: u32,
 }
 #[post("/find/user")]
 async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<Vec<PixivUser>>> {
@@ -254,6 +254,7 @@ async fn find_user(db: Data<Database>, form: Json<FindUserForm>) -> Result<Json<
 struct FindTagForm {
     search: Option<String>,
     ids: Option<Vec<ObjectId>>,
+    skip: u32,
     limit: u32,
 }
 #[post("/find/tag")]
@@ -291,6 +292,8 @@ struct FindIllustForm {
     sort_by: Option<SortBy>,
     source_inaccessible: Option<bool>,
     parent_ids: Option<Vec<ObjectId>>,
+    skip: u32,
+    limit: u32,
 }
 #[post("/find/illust")]
 async fn find_illust(

@@ -80,6 +80,14 @@ pub async fn cached_image_thumbnail(
     }
 }
 
+/// Get the Jpeg thumbnail of the image in bytes.
+///
+/// The `target_ratio` is the target ratio in height/width.
+/// For example, if the target ratio is `Some(0.75)`,
+/// a 16:9 image will be resized to a 4:3 image,
+/// and a 9:16 image will be resized to a 3:4 image.
+///
+/// If the `target_ratio` is `None`, the ratio of the image will be preserved.
 fn make_thumbnail(
     local_path: impl AsRef<Path>,
     size: u32,

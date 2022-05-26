@@ -227,24 +227,21 @@ async fn update_user_detail(
                 .get("workspace_image_url")
                 .unwrap_or(&None)
                 .clone(),
-            workspace: {
-                let mut workspace = BTreeMap::new();
-                for (k, v) in resp.workspace {
-                    if k == "workspace_image_url" {
-                        continue;
-                    }
-                    if let Some(v) = v {
-                        if !v.is_empty() {
-                            workspace.insert(k, v);
+            workspace: Some(
+                resp.workspace
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        if k != "workspace_image_url" {
+                            if let Some(v) = v {
+                                if !v.is_empty() {
+                                    return Some((k, v));
+                                }
+                            }
                         }
-                    }
-                }
-                if workspace.is_empty() {
-                    None
-                } else {
-                    Some(workspace)
-                }
-            },
+                        None
+                    })
+                    .collect(),
+            ),
         }),
     };
 

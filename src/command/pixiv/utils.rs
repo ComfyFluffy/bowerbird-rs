@@ -58,21 +58,22 @@ pub fn ugoira_to_mp4(
         .spawn()?;
     let mut stdin = ffmpeg.stdin.take().unwrap();
 
-    let mut t: f32 = 0.0;
+    let mut t: f32 = 0.0; // video length in milliseconds
     let mut frame = 0;
     for i in 0..zip_file.len() {
         t += *frame_delay
             .get(i)
             .ok_or(format!("Cannot get ugoira frame {i} from {frame_delay:?}"))?
-            as f32;
-        let next_frame = (t / (1000.0 / 60.0)).round() as i32;
+            as f32; // add delay for each frame
+        let next_frame = (t / (1000.0 / 60.0)).round() as i32; // get the next frame count at 60fps
         for _ in frame..next_frame {
+            // repeatly push the same frame to stdin
             let mut file = zip_file.by_index(i)?;
             std::io::copy(&mut file, &mut stdin)?;
         }
         frame = next_frame;
     }
-    drop(stdin);
+    drop(stdin); // close stdin to get status
     let status = ffmpeg.wait()?;
     if !status.success() {
         Err(format!("FFmpeg exited with status {status}"))?
