@@ -1,3 +1,4 @@
+use log::info;
 use mongodb::{bson::Document, Database};
 use pixivcrab::AppApi;
 use std::{
@@ -46,7 +47,10 @@ async fn illusts(
     let mut ugoira_map = HashMap::new();
 
     let mut items_sent = 0;
-    while let Some(r) = utils::retry_pager(&mut pager, 3).await? {
+    while let Some(r) = {
+        info!("getting illusts with offset: {}", items_sent);
+        utils::retry_pager(&mut pager, 3).await?
+    } {
         database::save_illusts(
             &r.illusts,
             api,
@@ -71,6 +75,7 @@ async fn illusts(
             break;
         }
     }
+    info!("{} illusts processed", items_sent);
 
     database::update_user_id_set(
         api,
@@ -121,15 +126,18 @@ async fn novels<'a>(
     update_exists: bool,
     task_config: &TaskConfig,
 ) -> crate::Result<()> {
-    let mut users_need_update_set = BTreeSet::new();
-    let mut items_sent = 0;
-
     let c_user = db.collection::<Document>("pixiv_user");
     let c_tag = db.collection::<Document>("pixiv_tag");
     let c_novel = db.collection::<Document>("pixiv_novel");
     let c_image = db.collection::<Document>("pixiv_image");
 
-    while let Some(r) = utils::retry_pager(&mut pager, 3).await? {
+    let mut users_need_update_set = BTreeSet::new();
+    let mut items_sent = 0;
+
+    while let Some(r) = {
+        info!("getting novels with offset: {}", items_sent);
+        utils::retry_pager(&mut pager, 3).await?
+    } {
         database::save_novels(
             r.novels,
             api,
@@ -146,6 +154,7 @@ async fn novels<'a>(
             break;
         }
     }
+    info!("{} novels processed", items_sent);
 
     database::update_user_id_set(
         api,

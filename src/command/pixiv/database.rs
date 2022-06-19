@@ -179,7 +179,7 @@ async fn update_user_detail(
     c_image: &Collection<Document>,
     task_config: &TaskConfig,
 ) -> crate::Result<()> {
-    info!("updating pixiv user {}", user_id);
+    info!("updating pixiv user data: {}", user_id);
     let resp = api.user_detail(&user_id).await.context(error::PixivApi)?;
     let user = PixivUser {
         last_modified: Some(DateTime::now()),
