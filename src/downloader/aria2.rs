@@ -24,7 +24,8 @@ pub struct Aria2Downloader {
 
 impl Drop for Aria2Downloader {
     fn drop(&mut self) {
-        let _ = self.child.start_kill();
+        let r = self.child.start_kill();
+        debug!("tried to kill aria2: {:?}", r);
     }
 }
 
@@ -101,7 +102,8 @@ impl Aria2Downloader {
 
     pub async fn wait_shutdown(self) {
         self.waitgroup.clone().await;
-        let _ = self.client.force_shutdown().await;
+        // let r = self.client.force_shutdown().await;
+        // debug!("tried to force shutdown aria2: {:?}", r);
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }

@@ -1,6 +1,6 @@
 use bson::to_bson;
 use clap::Parser;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use mongodb::Database;
 use snafu::ResultExt;
 use std::{path::PathBuf, time::Duration};
@@ -188,6 +188,10 @@ async fn run_internal() -> crate::Result<()> {
                 .context(error::PixivApi)?;
                 let auth_result = api.auth().await.context(error::PixivApi)?;
                 debug!("pixiv authed: {:?}", auth_result);
+                info!(
+                    "pixiv logged in: {} ({})",
+                    auth_result.user.name, auth_result.user.id
+                );
                 config.pixiv.refresh_token = auth_result.refresh_token;
                 config.save()?;
                 let selected_user_id = user_id.map_or(auth_result.user.id, |i| i.to_string());
