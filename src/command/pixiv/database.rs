@@ -353,7 +353,7 @@ pub async fn save_image_ugoira(
     if with_mp4 {
         let mut zip_path_db_slash = PathBuf::from_slash(zip_path_db);
         zip_path_db_slash.set_extension("mp4");
-        let mp4_path_db = zip_path_db_slash.to_slash_lossy();
+        let mp4_path_db = zip_path_db_slash.to_slash_lossy().to_string();
 
         zip_path.set_extension("mp4");
         let mp4_path = zip_path;

@@ -65,7 +65,7 @@ async fn operations(db: &Database, target_version: i32) -> crate::Result<()> {
                     .palette_rgb
                     .iter()
                     .map(|Rgb(r, g, b)| {
-                        let (h, s, v) = rgb_to_hsv(i16_to_u8(r), i16_to_u8(g), i16_to_u8(b));
+                        let [h, s, v] = rgb_to_hsv(i16_to_u8(r), i16_to_u8(g), i16_to_u8(b));
                         Hsv { h, s, v }
                     })
                     .collect();

@@ -6,9 +6,9 @@ use log4rs::{
     encode::Encode,
 };
 #[derive(Debug)]
-struct Encoder;
+struct ConsoleEncoder;
 
-impl Encode for Encoder {
+impl Encode for ConsoleEncoder {
     fn encode(
         &self,
         w: &mut dyn log4rs::encode::Write,
@@ -42,7 +42,7 @@ impl Encode for Encoder {
 
 pub fn init_log4rs() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let console_out = ConsoleAppender::builder()
-        .encoder(Box::new(Encoder))
+        .encoder(Box::new(ConsoleEncoder))
         .build();
     let config = Config::builder()
         .appender(Appender::builder().build("console", Box::new(console_out)))

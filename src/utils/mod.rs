@@ -19,7 +19,7 @@ where
     None
 }
 
-pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> [f32; 3] {
     let r = r as f32 / 255.0;
     let g = g as f32 / 255.0;
     let b = b as f32 / 255.0;
@@ -41,19 +41,23 @@ pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     }
     let s = if max == 0.0 { 0.0 } else { d / max };
     let v = max;
-    (h, s, v)
+    [h, s, v]
 }
 
 #[cfg(test)]
 mod tests {
+    use super::rgb_to_hsv;
     #[test]
     fn rgb2hsv() {
-        assert_eq!(super::rgb_to_hsv(255, 0, 0), (0.0, 1.0, 1.0));
-        assert_eq!(super::rgb_to_hsv(0, 255, 0), (120.0, 1.0, 1.0));
-        assert_eq!(super::rgb_to_hsv(0, 0, 255), (240.0, 1.0, 1.0));
-        assert_eq!(super::rgb_to_hsv(255, 255, 255), (0.0, 0.0, 1.0));
-        assert_eq!(super::rgb_to_hsv(0, 0, 0), (0.0, 0.0, 0.0));
-        // assert_eq!(super::rgb_to_hsv(108, 52, 62), (347.0, 0.52, 0.42));
+        assert_eq!(rgb_to_hsv(255, 0, 0), [0.0, 1.0, 1.0]);
+        assert_eq!(rgb_to_hsv(0, 255, 0), [120.0, 1.0, 1.0]);
+        assert_eq!(rgb_to_hsv(0, 0, 255), [240.0, 1.0, 1.0]);
+        assert_eq!(rgb_to_hsv(255, 255, 255), [0.0, 0.0, 1.0]);
+        assert_eq!(rgb_to_hsv(0, 0, 0), [0.0, 0.0, 0.0]);
+        assert_eq!(
+            rgb_to_hsv(108, 52, 62).map(|x| (x * 100.0).round()),
+            [34929.0, 52.0, 42.0]
+        );
     }
 }
 

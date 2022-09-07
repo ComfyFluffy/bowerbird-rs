@@ -90,7 +90,7 @@ pub fn get_palette(image_path: impl AsRef<Path>) -> Result<((i32, i32), Vec<Hsv>
     let hsv_v = color_thief::get_palette(thumbnail.as_raw(), color_thief::ColorFormat::Rgba, 5, 5)?
         .into_iter()
         .map(|c| {
-            let (h, s, v) = rgb_to_hsv(c.r, c.g, c.b);
+            let [h, s, v] = rgb_to_hsv(c.r, c.g, c.b);
             Hsv { h, s, v }
         })
         .collect();
