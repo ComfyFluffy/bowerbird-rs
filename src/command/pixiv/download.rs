@@ -20,7 +20,8 @@ use super::{
 };
 use crate::{
     downloader::{Aria2Downloader, Task, TaskHooks},
-    error::{self, BoxError}, utils::try_skip,
+    error::{self, BoxError},
+    utils::try_skip,
 };
 
 lazy_static! {
