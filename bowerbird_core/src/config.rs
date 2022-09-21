@@ -1,4 +1,4 @@
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::{
@@ -29,7 +29,7 @@ pub struct Config {
     #[serde(skip)]
     config_path: Option<PathBuf>,
 
-    pub mysql_uri: String,
+    pub postgres_uri: String,
     pub root_storage_dir: String,
     pub proxy_all: String,
     pub ffmpeg_path: String,
@@ -42,7 +42,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             config_path: None,
-            mysql_uri: "mysql://root:password@localhost:3306/bowerbird".to_string(),
+            postgres_uri: "postgresql://postgres:password@localhost/bowerbird".to_string(),
             root_storage_dir: dirs::home_dir()
                 .unwrap_or_default()
                 .join(".bowerbird")
@@ -97,6 +97,7 @@ impl Default for ServerConfig {
 
 impl Config {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Config> {
+        debug!("loading config from: {:?}", path.as_ref());
         let path = path.as_ref();
         if !path.exists() {
             info!("creating config file: {}", path.to_string_lossy());
@@ -117,20 +118,21 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = self
-            .config_path
-            .as_ref()
-            .ok_or_else(|| PathNotSetSnafu.build())?;
-        if let Some(p) = path.parent() {
-            std::fs::create_dir_all(p).context(IoSnafu)?;
+        if let Some(path) = &self.config_path {
+            if let Some(p) = path.parent() {
+                std::fs::create_dir_all(p).context(IoSnafu)?;
+            }
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)
+                .context(IoSnafu)?;
+            serde_json::to_writer_pretty(file, &self).context(JsonSnafu)?;
+        } else {
+            warn!("cannot save config without path");
         }
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .context(IoSnafu)?;
-        serde_json::to_writer_pretty(file, &self).context(JsonSnafu)
+        Ok(())
     }
 
     pub fn sub_dir(&self, dir: impl AsRef<Path>) -> PathBuf {

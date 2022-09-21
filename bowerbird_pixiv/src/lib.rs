@@ -188,6 +188,7 @@ async fn novels(
         info!("getting novels with offset: {}", items_sent);
         utils::retry_pager(&mut pager, 3).await?
     } {
+        debug!("novels: {:?}", r);
         database::save_novels(
             &r.novels,
             update_exists,
@@ -228,4 +229,29 @@ pub async fn novel_uploads(
 ) -> crate::Result<()> {
     let pager = kit.api.novel_uploads(user_id);
     novels(limit, update_exists, pager, kit).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bowerbird_core::config::Config;
+    use std::env::var;
+
+    fn generate_config() -> Config {
+        let mut c = Config::default();
+        c.pixiv.refresh_token = var("TEST_PIXIV_REFRESH_TOKEN").unwrap();
+        c
+    }
+
+    #[tokio::test]
+    async fn test_illusts() {
+        dotenvy::dotenv().ok();
+        bowerbird_cli::log::init_log4rs().unwrap();
+        let uid = var("TEST_PIXIV_USER_ID").unwrap();
+        let db = PgPool::connect(&var("DATABASE_URL").unwrap())
+            .await
+            .unwrap();
+        let kit = PixivKit::new(generate_config(), db).await.unwrap();
+        illust_bookmarks(&uid, false, Some(10), &kit).await.unwrap();
+    }
 }

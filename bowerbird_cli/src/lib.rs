@@ -5,7 +5,7 @@ use bowerbird_pixiv::PixivKit;
 use clap::Parser;
 use std::path::PathBuf;
 
-mod log;
+pub mod log;
 
 #[derive(Parser)]
 #[clap(version)]
@@ -79,7 +79,7 @@ async fn run_internal() -> anyhow::Result<()> {
         }
         .join("config.json");
         let config = Config::from_file(&config_path)?;
-        debug!("config loaded: {:?}", config_path);
+        debug!("config loaded: {:?}", config);
 
         Ok(config) as anyhow::Result<Config>
     };
@@ -87,7 +87,7 @@ async fn run_internal() -> anyhow::Result<()> {
     let pre_fn = async move {
         let config = config_builder()?;
 
-        let db = sqlx::PgPool::connect(&config.mysql_uri).await?;
+        let db = sqlx::PgPool::connect(&config.postgres_uri).await?;
 
         migrate(&db).await?;
 

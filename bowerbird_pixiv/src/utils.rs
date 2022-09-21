@@ -1,11 +1,12 @@
 use anyhow::anyhow;
 use chrono::NaiveDate;
 use futures::TryStreamExt;
-use log::warn;
+use log::{debug, warn};
 use pixivcrab::Pager;
 use serde::de::DeserializeOwned;
 use snafu::ResultExt;
 use std::{
+    fmt::Debug,
     fs::File,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -81,13 +82,14 @@ pub fn ugoira_to_mp4(
 
 pub async fn retry_pager<T>(pager: &mut Pager<T>, max_tries: i32) -> crate::Result<Option<T>>
 where
-    T: DeserializeOwned + pixivcrab::NextUrl + Send,
+    T: DeserializeOwned + pixivcrab::NextUrl + Debug + Send,
 {
     let mut tries = 0;
     loop {
         tries += 1;
         match pager.try_next().await.context(error::PixivApi) {
             Ok(r) => {
+                debug!("got response: {:?}", r);
                 return Ok(r);
             }
             Err(e) => {
@@ -97,7 +99,7 @@ where
                 } = &e
                 {
                     if tries <= max_tries {
-                        warn!("retrying on pixiv api error: {:?} :{}", pager, e);
+                        warn!("retrying on pixiv api error: {}", e);
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }

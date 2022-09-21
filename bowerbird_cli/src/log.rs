@@ -5,6 +5,7 @@ use log4rs::{
     config::{Appender, Config, Logger, Root},
     encode::Encode,
 };
+use std::env::var;
 #[derive(Debug)]
 struct ConsoleEncoder;
 
@@ -38,17 +39,17 @@ impl Encode for ConsoleEncoder {
 }
 
 pub fn init_log4rs() -> anyhow::Result<()> {
+    let console_level = var("BOWERBIRD_CONSOLE_LOG_LEVEL")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(log::LevelFilter::Info);
     let console_out = ConsoleAppender::builder()
         .encoder(Box::new(ConsoleEncoder))
         .build();
     let config = Config::builder()
         .appender(Appender::builder().build("console", Box::new(console_out)))
         .logger(Logger::builder().build("bowerbird", log::LevelFilter::Debug))
-        .build(
-            Root::builder()
-                .appender("console")
-                .build(log::LevelFilter::Warn),
-        )?;
+        .build(Root::builder().appender("console").build(console_level))?;
     log4rs::init_config(config)?;
     Ok(())
 }

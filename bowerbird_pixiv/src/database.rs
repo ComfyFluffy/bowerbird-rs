@@ -23,8 +23,8 @@ async fn update_users(
     out_of_date_duration: Duration,
     mut on_need_update: impl FnMut(&str),
 ) -> crate::Result<()> {
+    let mut tx = db.begin().await.context(error::Database)?;
     for user in users {
-        let mut tx = db.begin().await.context(error::Database)?;
         let user_id = user.id.to_string();
         // insert or update user
         let last_modified = {
@@ -80,6 +80,7 @@ async fn update_users(
             on_need_update(&user_id);
         }
     }
+    tx.commit().await.context(error::Database)?;
     Ok(())
 }
 
@@ -96,7 +97,7 @@ async fn update_tags(
     for alias in tags {
         let id = query!(
             "
-            select id from pixiv_tag where alias && $1
+            select id from pixiv_tag where alias && $1::varchar[]
             ",
             &alias
         )
@@ -108,7 +109,9 @@ async fn update_tags(
         if let Some(id) = id {
             query!(
                 "
-                update pixiv_tag set alias = ARRAY(select distinct unnest(alias || $1)) where id = $2
+                update pixiv_tag set
+                    alias = ARRAY(select distinct unnest(alias || $1::varchar[]))
+                where id = $2
                 ",
                 &alias,
                 id
@@ -127,10 +130,9 @@ async fn update_tags(
             .await
             .context(error::Database)?;
         };
-        // if let Some(ref mut on_id_returned) = on_id_returned {
-        //     on_id_returned(&alias, id);
-        // }
     }
+    tx.commit().await.context(error::Database)?;
+
     Ok(())
 }
 
@@ -259,7 +261,7 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
 
     let workspace: BTreeMap<String, String> = workspace
         .into_iter()
-        .filter_map(|(k, v)| v.map(|v| (k, v)))
+        .filter_map(|(k, v)| v.filter(not_empty).map(|v| (k, v)))
         .collect();
 
     {
@@ -328,6 +330,7 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         profile.webpage,
         serde_json::to_value(&workspace).unwrap_or_default()
     ).execute(&mut tx).await.context(error::Database)?;
+    tx.commit().await.context(error::Database)?;
     Ok(())
 }
 
@@ -384,6 +387,7 @@ pub async fn save_image(
         ",
     );
     q.build().execute(&mut tx).await.context(error::Database)?;
+    tx.commit().await.context(error::Database)?;
     Ok(())
 }
 
@@ -439,6 +443,7 @@ pub async fn save_image_ugoira(
         .await
         .context(error::Database)?;
     }
+    tx.commit().await.context(error::Database)?;
     Ok(())
 }
 
@@ -459,9 +464,28 @@ pub async fn save_illusts(
     )
     .await?;
 
-    let mut tx = kit.db.begin().await.context(error::Database)?;
     for i in illusts {
         let id = i.id.to_string();
+        let delay = if i.r#type == "ugoira" {
+            let ugoira = kit
+                .api
+                .ugoira_metadata(&id)
+                .await
+                .context(error::PixivApi)?;
+            let delay: Vec<i32> = ugoira
+                .ugoira_metadata
+                .frames
+                .iter()
+                .map(|frame| frame.delay)
+                .collect();
+            on_ugoira_metadata(&id, (&ugoira.ugoira_metadata.zip_urls.medium, &delay));
+            Some(delay)
+        } else {
+            None
+        };
+        let delay_slice = delay.as_deref();
+
+        let mut tx = kit.db.begin().await.context(error::Database)?;
         if !i.visible {
             if i.id != 0 {
                 set_source_inaccessible(&mut tx, "pixiv_illust", &id).await?;
@@ -521,24 +545,12 @@ pub async fn save_illusts(
                 .collect()
         };
 
-        let delay = if i.r#type == "ugoira" {
-            let ugoira = kit
-                .api
-                .ugoira_metadata(&id)
-                .await
-                .context(error::PixivApi)?;
-            let delay: Vec<i32> = ugoira
-                .ugoira_metadata
-                .frames
-                .iter()
-                .map(|frame| frame.delay)
-                .collect();
-            on_ugoira_metadata(&id, (&ugoira.ugoira_metadata.zip_urls.medium, &delay));
-            Some(delay)
-        } else {
-            None
-        };
-        let delay_slice = delay.as_deref();
+        let mut q = QueryBuilder::new("insert into pixiv_media (url) ");
+        q.push_values(&urls, |mut b, v| {
+            b.push_bind(v);
+        });
+        q.push(" on conflict (url) do nothing");
+        q.build().execute(&mut tx).await.context(error::Database)?;
 
         query!(
             "
@@ -569,6 +581,7 @@ pub async fn save_illusts(
             &urls,
             delay_slice
         ).execute(&mut tx).await.context(error::Database)?;
+        tx.commit().await.context(error::Database)?;
     }
     Ok(())
 }
@@ -591,18 +604,21 @@ pub async fn save_novels(
     )
     .await?;
 
-    let mut tx = kit.db.begin().await.context(error::Database)?;
     for n in novels {
+        let id = n.id.to_string();
+        info!("pixiv: getting novel text of {}", id);
+        let r = kit.api.novel_text(&id).await.context(error::PixivApi)?;
+
+        let mut tx = kit.db.begin().await.context(error::Database)?;
         if !on_each_should_continue() {
             return Ok(());
         }
         if !n.visible {
             if n.id != 0 {
-                set_source_inaccessible(&mut tx, "pixiv_novel", &n.id.to_string()).await?;
+                set_source_inaccessible(&mut tx, "pixiv_novel", &id).await?;
             }
             continue;
         }
-        let id = n.id.to_string();
 
         let alias: Vec<String> = flatten_tags_alias(n.tags.iter())
             .into_iter()
@@ -657,9 +673,6 @@ pub async fn save_novels(
             continue;
         }
 
-        info!("pixiv: getting novel text of {}", id);
-        let r = kit.api.novel_text(&id).await.context(error::PixivApi)?;
-
         query!(
             "
             insert into pixiv_novel_history (item_id, title, date, caption_html, text)
@@ -682,6 +695,7 @@ pub async fn save_novels(
         .execute(&mut tx)
         .await
         .context(error::Database)?;
+        tx.commit().await.context(error::Database)?;
     }
 
     Ok(())
