@@ -1,5 +1,5 @@
 #[tokio::main]
-async fn main() -> i32 {
+async fn main() {
     // let mut agent = PyroscopeAgent::builder("http://localhost:4040", "bb")
     //     .build()
     //     .unwrap();
@@ -7,5 +7,5 @@ async fn main() -> i32 {
 
     dotenvy::dotenv().ok();
 
-    bowerbird_cli::run().await
+    std::process::exit(bowerbird_cli::run().await);
 }

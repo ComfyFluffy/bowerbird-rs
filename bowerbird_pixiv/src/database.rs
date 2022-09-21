@@ -5,11 +5,9 @@ use path_slash::PathBufExt;
 use snafu::ResultExt;
 use sqlx::{query, PgPool, Postgres};
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashSet},
     convert::TryInto,
     env::var,
-    ops::DerefMut,
     path::{Path, PathBuf},
 };
 
@@ -21,11 +19,12 @@ pub(crate) type Transaction = sqlx::Transaction<'static, Postgres>;
 
 async fn update_users(
     users: impl Iterator<Item = &pixivcrab::models::user::User>,
-    tx: &RefCell<Transaction>,
+    db: &PgPool,
     out_of_date_duration: Duration,
     mut on_need_update: impl FnMut(&str),
 ) -> crate::Result<()> {
     for user in users {
+        let mut tx = db.begin().await.context(error::Database)?;
         let user_id = user.id.to_string();
         // insert or update user
         let last_modified = {
@@ -39,7 +38,7 @@ async fn update_users(
                 true,
                 user.is_followed
             )
-            .fetch_one(tx.borrow_mut().deref_mut())
+            .fetch_one(&mut tx)
             .await
             .context(error::Database)?
             .last_modified
@@ -59,7 +58,7 @@ async fn update_users(
         ",
             &user_id
         )
-        .fetch_optional(tx.borrow_mut().deref_mut())
+        .fetch_optional(&mut tx)
         .await
         .context(error::Database)?
         .and_then(|row| row.url);
@@ -86,13 +85,14 @@ async fn update_users(
 
 async fn update_tags(
     tags: impl Iterator<Item = &pixivcrab::models::Tag>,
-    tx: &RefCell<Transaction>,
+    db: &PgPool,
     // mut on_id_returned: Option<impl FnMut(&Vec<String>, i32)>,
 ) -> crate::Result<()> {
     let tags: Vec<Vec<String>> = flatten_tags_and_insert(tags)
         .into_iter()
         .map(|x| x.into_iter().map(|x| x.to_string()).collect())
         .collect();
+    let mut tx = db.begin().await.context(error::Database)?;
     for alias in tags {
         let id = query!(
             "
@@ -100,12 +100,12 @@ async fn update_tags(
             ",
             &alias
         )
-        .fetch_optional(tx.borrow_mut().deref_mut())
+        .fetch_optional(&mut tx)
         .await
         .context(error::Database)?
         .map(|row| row.id);
 
-        let id = if let Some(id) = id {
+        if let Some(id) = id {
             query!(
                 "
                 update pixiv_tag set alias = ARRAY(select distinct unnest(alias || $1)) where id = $2
@@ -113,22 +113,19 @@ async fn update_tags(
                 &alias,
                 id
             )
-            .execute(tx.borrow_mut().deref_mut())
+            .execute(&mut tx)
             .await
             .context(error::Database)?;
-            id
         } else {
             query!(
                 "
                 insert into pixiv_tag (alias) values ($1)
-                returning id
                 ",
                 &alias
             )
-            .fetch_one(tx.borrow_mut().deref_mut())
+            .execute(&mut tx)
             .await
-            .context(error::Database)?
-            .id
+            .context(error::Database)?;
         };
         // if let Some(ref mut on_id_returned) = on_id_returned {
         //     on_id_returned(&alias, id);
@@ -164,7 +161,7 @@ fn flatten_tags_and_insert<'a>(
 }
 
 async fn set_source_inaccessible(
-    tx: &RefCell<Transaction>,
+    tx: &mut Transaction,
     table_name: &str,
     source_id: &str,
 ) -> crate::Result<()> {
@@ -177,7 +174,7 @@ async fn set_source_inaccessible(
         "
     ))
     .bind(source_id)
-    .execute(tx.borrow_mut().deref_mut())
+    .execute(tx)
     .await
     .context(error::Database)?;
     Ok(())
@@ -451,24 +448,23 @@ pub async fn save_illusts(
     on_user_need_update: impl FnMut(&str),
     mut on_ugoira_metadata: impl FnMut(&str, (&str, &[i32])),
 ) -> crate::Result<()> {
-    let tx = RefCell::new(kit.db.begin().await.context(error::Database)?);
-
-    update_tags(illusts.iter().flat_map(|x| &x.tags), &tx).await?;
+    update_tags(illusts.iter().flat_map(|x| &x.tags), &kit.db).await?;
     update_users(
         illusts
             .iter()
             .filter_map(|x| Some(&x.user).filter(|u| u.id != 0)),
-        &tx,
+        &kit.db,
         Duration::days(7), // TODO: use env var
         on_user_need_update,
     )
     .await?;
 
+    let mut tx = kit.db.begin().await.context(error::Database)?;
     for i in illusts {
         let id = i.id.to_string();
         if !i.visible {
             if i.id != 0 {
-                set_source_inaccessible(&tx, "pixiv_illust", &id).await?;
+                set_source_inaccessible(&mut tx, "pixiv_illust", &id).await?;
             }
             continue;
         }
@@ -507,7 +503,7 @@ pub async fn save_illusts(
             i.is_bookmarked,
             &alias
         )
-        .fetch_one(tx.borrow_mut().deref_mut())
+        .fetch_one(&mut tx)
         .await
         .context(error::Database)?
         .id;
@@ -542,9 +538,9 @@ pub async fn save_illusts(
         } else {
             None
         };
-        let delay_slice = delay.as_ref().map(|x| x.as_slice());
+        let delay_slice = delay.as_deref();
 
-        let history_id = query!(
+        query!(
             "
             insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, media_ids, ugoira_frame_duration)
             select
@@ -564,7 +560,6 @@ pub async fn save_illusts(
                 ) on unnest = pixiv_media.url)
                 and ugoira_frame_duration = $7
             )
-            returning id
             ",
             item_id,
             i.r#type,
@@ -573,7 +568,7 @@ pub async fn save_illusts(
             i.create_date.naive_utc(),
             &urls,
             delay_slice
-        ).fetch_optional(tx.borrow_mut().deref_mut()).await.context(error::Database)?.map(|r| r.id);
+        ).execute(&mut tx).await.context(error::Database)?;
     }
     Ok(())
 }
@@ -585,26 +580,25 @@ pub async fn save_novels(
     mut on_each_should_continue: impl FnMut() -> bool,
     on_user_need_update: impl FnMut(&str),
 ) -> crate::Result<()> {
-    let tx = RefCell::new(kit.db.begin().await.context(error::Database)?);
-
-    update_tags(novels.iter().flat_map(|x| &x.tags), &tx).await?;
+    update_tags(novels.iter().flat_map(|x| &x.tags), &kit.db).await?;
     update_users(
         novels
             .iter()
             .filter_map(|x| Some(&x.user).filter(|u| u.id != 0)),
-        &tx,
+        &kit.db,
         Duration::days(7), // TODO: use env var
         on_user_need_update,
     )
     .await?;
 
+    let mut tx = kit.db.begin().await.context(error::Database)?;
     for n in novels {
         if !on_each_should_continue() {
             return Ok(());
         }
         if !n.visible {
             if n.id != 0 {
-                set_source_inaccessible(&tx, "pixiv_novel", &n.id.to_string()).await?;
+                set_source_inaccessible(&mut tx, "pixiv_novel", &n.id.to_string()).await?;
             }
             continue;
         }
@@ -644,7 +638,7 @@ pub async fn save_novels(
             n.is_bookmarked,
             &alias
         )
-        .fetch_one(tx.borrow_mut().deref_mut())
+        .fetch_one(&mut tx)
         .await
         .context(error::Database)?
         .id;
@@ -655,7 +649,7 @@ pub async fn save_novels(
             ",
             item_id
         )
-        .fetch_optional(tx.borrow_mut().deref_mut())
+        .fetch_optional(&mut tx)
         .await
         .context(error::Database)?
         .is_some();
@@ -685,7 +679,7 @@ pub async fn save_novels(
             n.caption,
             r.novel_text
         )
-        .execute(tx.borrow_mut().deref_mut())
+        .execute(&mut tx)
         .await
         .context(error::Database)?;
     }
