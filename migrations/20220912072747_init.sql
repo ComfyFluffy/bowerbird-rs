@@ -64,7 +64,7 @@ create table pixiv_media
         primary key,
     url        varchar(255) null,
     size       bigint       null,
-    mime       varchar(16)  null,
+    mime       varchar(32)  null,
     local_path varchar(255) null,
     width      int          null,
     height     int          null,
@@ -159,8 +159,6 @@ create table pixiv_user
     total_novel_series     int         null,
     total_novels           int         null,
     total_public_bookmarks int         null,
-    constraint pixiv_user_id_uindex
-        unique (id),
     constraint pixiv_user_source_id_uindex
         unique (source_id)
 );

@@ -1,0 +1,26 @@
+[package]
+name = "bowerbird_cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bowerbird_core = { path = "../bowerbird_core" }
+bowerbird_pixiv = { path = "../bowerbird_pixiv" }
+
+clap = { version = "3", features = ["derive"] }
+log = "0.4"
+anyhow = "1"
+sqlx = { version = "0.6", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "time",
+    "chrono",
+] }
+dirs = "4"
+log4rs = { version = "1", default-features = false, features = [
+    "console_appender",
+] }
+colored = "2"
+chrono = "0.4"

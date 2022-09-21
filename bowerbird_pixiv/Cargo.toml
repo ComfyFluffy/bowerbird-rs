@@ -1,0 +1,35 @@
+[package]
+name = "bowerbird_pixiv"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bowerbird_utils = { path = "../bowerbird_utils" }
+bowerbird_core = { path = "../bowerbird_core" }
+
+lazy_static = "1"
+regex = "1"
+pixivcrab = "0.3"
+tokio = { version = "1", features = [] }
+log = "0.4"
+snafu = { version = "0.7" }
+futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.6", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "time",
+    "chrono",
+    "json",
+] }
+reqwest = { version = "0.11", features = ["socks"] }
+url = "2"
+zip = "0.6"
+anyhow = "1"
+serde = "1"
+serde_json = "1"
+aria2-ws = "0.3"
+mime_guess = "2"
+path-slash = "0.2"
