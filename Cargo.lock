@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "bowerbird"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bowerbird_cli",
  "dotenvy",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "bowerbird_cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bowerbird_core",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "bowerbird_core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "futures",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "bowerbird_migrate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bson",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "bowerbird_pixiv"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "aria2-ws",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "bowerbird_utils"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "aria2-ws",
