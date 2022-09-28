@@ -4,6 +4,7 @@ use log::debug;
 use sqlx::{migrate::MigrateError, PgPool};
 
 pub mod config;
+pub mod model;
 
 pub async fn migrate(db: &PgPool) -> Result<(), MigrateError> {
     debug!("migration started");

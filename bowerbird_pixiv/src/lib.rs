@@ -31,11 +31,6 @@ where
     }
 }
 
-// pub(crate) struct LocalCache {
-//     pub user_to_id: HashMap<String, i64>,
-//     pub tag_to_id: HashMap<String, i64>,
-// }
-
 #[derive(Debug, Clone)]
 pub struct TaskConfig {
     pub ffmpeg_path: Option<PathBuf>,

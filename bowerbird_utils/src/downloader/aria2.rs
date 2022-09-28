@@ -38,7 +38,7 @@ impl Aria2Downloader {
             .build()
         })?;
         let mut child = Command::new(aria2_path)
-            .args(&[
+            .args([
                 "--no-conf",
                 "--auto-file-renaming=false",
                 "--enable-rpc",

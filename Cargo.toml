@@ -9,12 +9,7 @@ edition = "2021"
 
 members = [
   # ".",
-  # "bowerbird_cli",
-  "bowerbird_utils",
-  # "bowerbird_server",
-  "bowerbird_pixiv",
-  "bowerbird_migrate",
-  "bowerbird_core",
+  "bowerbird_*",
 ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

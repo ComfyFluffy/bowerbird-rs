@@ -30,7 +30,6 @@
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
-				"vadimcn.vscode-lldb",
 				"mutantdino.resourcemonitor",
 				"rust-lang.rust-analyzer",
 				"tamasfe.even-better-toml",
@@ -45,7 +44,9 @@
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode",
 	"mounts": [
-		"source=rust-target,target=/target,type=volume"
+		"source=rust-target,target=/target,type=volume",
+		"source=rust-registry,target=/usr/local/cargo/registry,type=volume",
+		"source=D:/PixivDownload,target=/pixiv,type=bind"
 	],
-	"postCreateCommand": "sudo chown vscode /target && echo '[build]\ntarget-dir = \"/target\"' > /usr/local/cargo/config.toml"
+	"postCreateCommand": "sudo chown vscode /target && sudo chown vscode /usr/local/cargo/registry && echo '[build]\ntarget-dir = \"/target\"' > /usr/local/cargo/config.toml"
 }

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bowerbird_core = { path = "../bowerbird_core" }
 bowerbird_pixiv = { path = "../bowerbird_pixiv" }
+bowerbird_server = { path = "../bowerbird_server" }
 
 clap = { version = "3", features = ["derive"] }
 log = "0.4"

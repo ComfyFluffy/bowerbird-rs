@@ -1,9 +1,7 @@
 use actix_web::http::StatusCode;
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
-
-use crate::error::BoxError;
+use std::fmt::{self, Debug};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Error {
@@ -11,7 +9,7 @@ pub struct Error {
     #[serde(skip)]
     pub status: StatusCode,
     #[serde(skip)]
-    pub source: Option<BoxError>,
+    pub source: Option<anyhow::Error>,
 }
 
 impl fmt::Display for Error {
@@ -39,7 +37,7 @@ impl Error {
             } else {
                 message.to_string()
             },
-            source: Some(Box::new(source)),
+            source: Some(anyhow::anyhow!(source)),
         }
     }
 
@@ -107,24 +105,24 @@ where
     }
 }
 
-pub struct StrErr(pub &'static str);
-impl Display for StrErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self, f)
-    }
-}
-impl Debug for StrErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self, f)
-    }
-}
-impl std::error::Error for StrErr {}
+// pub struct StrErr(pub &'static str);
+// impl Display for StrErr {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         Display::fmt(&self, f)
+//     }
+// }
+// impl Debug for StrErr {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         Debug::fmt(&self, f)
+//     }
+// }
+// impl std::error::Error for StrErr {}
 
-pub trait ToError<T> {
-    fn to_error(self) -> Result<T, StrErr>;
-}
-impl<T> ToError<T> for Result<T, &'static str> {
-    fn to_error(self) -> Result<T, StrErr> {
-        self.map_err(StrErr)
-    }
-}
+// pub trait ToError<T> {
+//     fn to_error(self) -> Result<T, StrErr>;
+// }
+// impl<T> ToError<T> for Result<T, &'static str> {
+//     fn to_error(self) -> Result<T, StrErr> {
+//         self.map_err(StrErr)
+//     }
+// }

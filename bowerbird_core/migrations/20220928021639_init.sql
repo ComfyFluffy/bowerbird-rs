@@ -1,33 +1,16 @@
-create table pixiv_tag
-(
-    id    serial
-        constraint pixiv_tag_pk
-            primary key,
-    alias varchar(128)[]
-);
-
-alter table pixiv_tag
-    owner to postgres;
-
-create index pixiv_tag_alias_index
-    on pixiv_tag using gin (alias);
-
 create table pixiv_media
 (
-    id         serial
+    id          serial
         constraint pixiv_media_pk
             primary key,
-    url        varchar(256),
-    size       integer,
-    mime       varchar(32),
-    local_path varchar(256),
-    width      integer,
-    height     integer
+    url         varchar(256),
+    inserted_at timestamp with time zone default now(),
+    size        integer,
+    mime        varchar(32),
+    local_path  varchar(256),
+    width       integer,
+    height      integer
 );
-
-alter table pixiv_media
-    owner to postgres;
-
 create unique index pixiv_media_url_uindex
     on pixiv_media (url);
 
@@ -44,8 +27,17 @@ create table pixiv_media_color
     v        double precision
 );
 
-alter table pixiv_media_color
-    owner to postgres;
+
+create table pixiv_tag
+(
+    id    serial
+        constraint pixiv_tag_pk
+            primary key,
+    alias varchar(128)[]
+);
+create index pixiv_tag_alias_index
+    on pixiv_tag using gin (alias);
+
 
 create table pixiv_user
 (
@@ -53,8 +45,9 @@ create table pixiv_user
         constraint pixiv_user_pk
             primary key,
     source_id              varchar(24),
+    inserted_at            timestamp with time zone default now(),
+    updated_at             timestamp with time zone,
     source_inaccessible    boolean,
-    last_modified          timestamp,
     is_followed            boolean,
     total_following        integer,
     total_illust_series    integer,
@@ -64,10 +57,6 @@ create table pixiv_user
     total_novels           integer,
     total_public_bookmarks integer
 );
-
-alter table pixiv_user
-    owner to postgres;
-
 create unique index pixiv_user_source_id_uindex
     on pixiv_user (source_id);
 
@@ -88,7 +77,7 @@ create table pixiv_user_history
     avatar_id          integer
         constraint pixiv_user_history_pixiv_media_null_fk_avatar_id
             references pixiv_media,
-    last_modified      timestamp,
+    inserted_at        timestamp with time zone default now(),
     birth              date,
     region             varchar(64),
     gender             varchar(8),
@@ -98,8 +87,6 @@ create table pixiv_user_history
     workspace          jsonb
 );
 
-alter table pixiv_user_history
-    owner to postgres;
 
 create table pixiv_illust
 (
@@ -110,17 +97,14 @@ create table pixiv_illust
         constraint pixiv_illust_pixiv_user_null_fk
             references pixiv_user,
     source_id           varchar(24),
+    inserted_at         timestamp with time zone default now(),
+    updated_at          timestamp with time zone,
     source_inaccessible boolean,
-    last_modified       timestamp,
     total_bookmarks     integer,
     total_view          integer,
     is_bookmarked       boolean,
     tag_ids             integer[]
 );
-
-alter table pixiv_illust
-    owner to postgres;
-
 create unique index pixiv_illust_source_id_uindex
     on pixiv_illust (source_id);
 
@@ -132,16 +116,15 @@ create table pixiv_illust_history
     item_id               integer
         constraint pixiv_illust_history_pixiv_illust_null_fk
             references pixiv_illust,
+    inserted_at           timestamp with time zone default now(),
     illust_type           varchar(10),
     caption_html          text,
     title                 varchar(256),
-    date                  timestamp,
+    date                  timestamp with time zone,
     media_ids             integer[],
     ugoira_frame_duration integer[]
 );
 
-alter table pixiv_illust_history
-    owner to postgres;
 
 create table pixiv_novel
 (
@@ -152,17 +135,14 @@ create table pixiv_novel
         constraint pixiv_novel_pixiv_user_null_fk
             references pixiv_user,
     source_id           varchar(24),
+    inserted_at         timestamp with time zone default now(),
+    updated_at          timestamp with time zone,
     source_inaccessible boolean,
-    last_modified       timestamp,
     total_bookmarks     integer,
     total_view          integer,
     is_bookmarked       boolean,
     tag_ids             integer[]
 );
-
-alter table pixiv_novel
-    owner to postgres;
-
 create unique index pixiv_novel_source_id_uindex
     on pixiv_novel (source_id);
 
@@ -177,12 +157,9 @@ create table pixiv_novel_history
     cover_image_id integer
         constraint pixiv_novel_history_pixiv_media_null_fk
             references pixiv_media,
+    inserted_at    timestamp with time zone default now(),
     title          varchar(256),
     caption_html   text,
     text           text,
     date           timestamp
 );
-
-alter table pixiv_novel_history
-    owner to postgres;
-

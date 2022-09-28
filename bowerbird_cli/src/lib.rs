@@ -100,7 +100,8 @@ async fn run_internal() -> anyhow::Result<()> {
             info!("migration finished");
         }
         SubcommandMain::Serve => {
-            todo!()
+            let (config, db) = pre_fn.await?;
+            bowerbird_server::run(db, config).await?;
         }
         SubcommandMain::Init => {
             config_builder()?;

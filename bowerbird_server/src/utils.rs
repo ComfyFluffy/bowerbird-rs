@@ -1,5 +1,4 @@
 use actix_web::http::StatusCode;
-use bson::Regex;
 use bytes::Bytes;
 use image::{imageops::FilterType::Lanczos3, GenericImageView, ImageOutputFormat};
 use log::debug;
@@ -12,7 +11,7 @@ use std::{
 };
 use tokio::{sync::Semaphore, task::spawn_blocking};
 
-use crate::server::error::ServerErrorExt;
+use crate::error::ServerErrorExt;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ThumbnailCacheKey {
@@ -130,11 +129,4 @@ fn make_thumbnail(
         t.elapsed()
     );
     Ok(Bytes::from(b))
-}
-
-pub fn build_search_regex(search: &str) -> Regex {
-    Regex {
-        pattern: regex::escape(search),
-        options: "i".to_string(),
-    }
 }

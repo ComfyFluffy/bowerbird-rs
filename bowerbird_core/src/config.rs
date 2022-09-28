@@ -109,7 +109,7 @@ impl Config {
             defaults.save()?;
             Ok(defaults)
         } else {
-            let file = File::open(&path).context(IoSnafu)?;
+            let file = File::open(path).context(IoSnafu)?;
             let mut config_loaded: Config = serde_json::from_reader(file).context(JsonSnafu)?;
             config_loaded.config_path = Some(PathBuf::from(path));
             config_loaded.save()?;

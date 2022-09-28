@@ -27,12 +27,12 @@ async fn update_users(
     for user in users {
         let user_id = user.id.to_string();
         // insert or update user
-        let last_modified = {
+        let updated_at = {
             query!(
                 "
             insert into pixiv_user (source_id, source_inaccessible, is_followed) values ($1, $2, $3)
             on conflict (source_id) do update set source_inaccessible = $2, is_followed = $3
-            returning last_modified
+            returning updated_at
             ",
                 &user_id,
                 true,
@@ -41,7 +41,7 @@ async fn update_users(
             .fetch_one(&mut tx)
             .await
             .context(error::Database)?
-            .last_modified
+            .updated_at
         };
 
         let avatar_url = query!(
@@ -68,9 +68,8 @@ async fn update_users(
                 return false;
             }
 
-            if let Some(last_modified) = last_modified {
-                let now = Utc::now().naive_utc();
-                now - last_modified < out_of_date_duration
+            if let Some(updated_at) = updated_at {
+                Utc::now() - updated_at < out_of_date_duration
             } else {
                 false
             }
@@ -219,12 +218,12 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
 
     let id = query!(
         "
-        insert into pixiv_user (source_id, source_inaccessible, last_modified, is_followed, total_following,
+        insert into pixiv_user (source_id, source_inaccessible, updated_at, is_followed, total_following,
             total_illust_series, total_illusts, total_manga, total_novel_series, total_novels,
             total_public_bookmarks) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         on conflict (source_id) do update set
             source_inaccessible = $2,
-            last_modified = $3,
+            updated_at = $3,
             is_followed = $4,
             total_following = $5,
             total_illust_series = $6,
@@ -237,7 +236,7 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         ",
         user_id,
         false,
-        Utc::now().naive_utc(),
+        Utc::now(),
         user.is_followed,
         profile.total_follow_users,
         profile.total_illust_series,
@@ -289,7 +288,7 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
 
     query!(
         "
-        insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, last_modified, birth, region,
+        insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
             gender, comment, twitter_account, web_page, workspace)
         select 
             $1,
@@ -500,7 +499,7 @@ pub async fn save_illusts(
         let item_id = query!(
             "
             insert into pixiv_illust (parent_id, source_id, total_bookmarks, total_view,
-                is_bookmarked, tag_ids, source_inaccessible, last_modified)
+                is_bookmarked, tag_ids, source_inaccessible, updated_at)
             values (
                 (select id from pixiv_user where source_id = $1),
                 $2,
@@ -517,7 +516,7 @@ pub async fn save_illusts(
                 is_bookmarked = $5,
                 tag_ids = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
                 source_inaccessible = false,
-                last_modified = now()
+                updated_at = now()
             returning id
             ",
             i.user.id.to_string(),
@@ -561,9 +560,13 @@ pub async fn save_illusts(
                 $3,
                 $4::varchar,
                 $5,
-                (SELECT array_agg(id) FROM pixiv_media join unnest(
-                    $6::varchar[]
-                ) on unnest = pixiv_media.url),
+                (select array_agg(id order by i)
+                from (SELECT id, urls.i i
+                      FROM pixiv_media
+                               join unnest(
+                                $6::varchar[]
+                          )
+                          with ordinality urls(url, i) using (url)) t),
                 $7
             where not exists (select id from pixiv_illust_history where 
                 item_id = $1 and illust_type = $2 and caption_html = $3 and title = $4 and date = $5
@@ -577,7 +580,7 @@ pub async fn save_illusts(
             i.r#type,
             i.caption,
             i.title,
-            i.create_date.naive_utc(),
+            i.create_date,
             &urls,
             delay_slice
         ).execute(&mut tx).await.context(error::Database)?;
@@ -627,7 +630,7 @@ pub async fn save_novels(
         let item_id = query!(
             "
             insert into pixiv_novel (parent_id, source_id, total_bookmarks, total_view,
-                is_bookmarked, tag_ids, source_inaccessible, last_modified)
+                is_bookmarked, tag_ids, source_inaccessible, updated_at)
             values (
                 (select id from pixiv_user where source_id = $1),
                 $2,
@@ -644,7 +647,7 @@ pub async fn save_novels(
                 is_bookmarked = $5,
                 tag_ids = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
                 source_inaccessible = false,
-                last_modified = now()
+                updated_at = now()
             returning id
             ",
             n.user.id.to_string(),

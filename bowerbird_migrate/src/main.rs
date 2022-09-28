@@ -30,8 +30,8 @@ async fn images(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
     for img in old {
         let ext = img.extension.as_ref();
         let id: i32 = query!(
-            "INSERT INTO pixiv_media (url, size, mime, local_path, width, height) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-            img.url, img.size as i32, img.mime, img.local_path, ext.map(|x| x.width as i32), ext.map(|x| x.height as i32)
+            "INSERT INTO pixiv_media (url, size, mime, local_path, width, height, inserted_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            img.url, img.size as i32, img.mime, img.local_path, ext.map(|x| x.width as i32), ext.map(|x| x.height as i32), img._id.map(|o| o.timestamp().to_chrono())
         ).fetch_one(&mut tr).await?.id;
         if let Some(ext) = img.extension {
             let mut q = QueryBuilder::new("INSERT INTO pixiv_media_color (media_id, h, s, v) ");
@@ -53,10 +53,10 @@ async fn users(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
     for user in old {
         let ext = user.extension.as_ref();
         let id = query!(
-            "INSERT INTO pixiv_user (source_id, source_inaccessible, last_modified, is_followed, total_following, total_illust_series, total_illusts, total_manga, total_novel_series, total_novels, total_public_bookmarks) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id",
+            "INSERT INTO pixiv_user (source_id, source_inaccessible, updated_at, is_followed, total_following, total_illust_series, total_illusts, total_manga, total_novel_series, total_novels, total_public_bookmarks, inserted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id",
             user.source_id.as_ref(),
             user.source_inaccessible,
-            user.last_modified.map(|dt| dt.to_chrono().naive_utc()),
+            user.last_modified.map(|dt| dt.to_chrono()),
             ext.map(|v| v.is_followed),
             ext.map(|v| (v.total_following.unwrap_or_default() as i32)),
             ext.map(|v| (v.total_illust_series.unwrap_or_default() as i32)),
@@ -64,11 +64,12 @@ async fn users(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             ext.map(|v| (v.total_manga.unwrap_or_default() as i32)),
             ext.map(|v| (v.total_novel_series.unwrap_or_default() as i32)),
             ext.map(|v| (v.total_novels.unwrap_or_default() as i32)),
-            ext.map(|v| (v.total_public_bookmarks.unwrap_or_default()  as i32)),
+            ext.map(|v| (v.total_public_bookmarks.unwrap_or_default() as i32)),
+            user._id.map(|o| o.timestamp().to_chrono())
         ).fetch_one(&mut tr).await?.id;
 
         let mut query_builder = QueryBuilder::new(
-                "insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, last_modified, birth, region,
+                "insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
                     gender, comment, twitter_account, web_page, workspace)",
             );
         query_builder.push_values(&user.history, |mut b, h| {
@@ -166,11 +167,12 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             parent_id,
             source_id,
             source_inaccessible,
-            last_modified,
+            updated_at,
             total_bookmarks,
             total_view,
             is_bookmarked,
-            tag_ids
+            tag_ids,
+            inserted_at
         ) VALUES (
             (SELECT id FROM pixiv_user WHERE source_id = $1),
             $2,
@@ -179,16 +181,18 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             $5,
             $6,
             $7,
-            (SELECT array_agg(id) FROM pixiv_tag WHERE alias && $8::varchar[])
+            (SELECT array_agg(id) FROM pixiv_tag WHERE alias && $8::varchar[]),
+            $9
         ) RETURNING id",
             parent.as_ref().map(|v| v.source_id.as_ref().unwrap()),
             illust.source_id.as_ref(),
             illust.source_inaccessible,
-            illust.last_modified.map(|dt| dt.to_chrono().naive_utc()),
+            illust.last_modified.map(|dt| dt.to_chrono()),
             illust.extension.as_ref().map(|v| v.total_bookmarks as i32),
             illust.extension.as_ref().map(|v| v.total_view as i32),
             illust.extension.as_ref().map(|v| v.is_bookmarked),
-            alias.as_slice()
+            alias.as_slice(),
+            illust._id.map(|o| o.timestamp().to_chrono()),
         )
         .fetch_one(&mut tr)
         .await?
@@ -202,7 +206,9 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                     caption_html,
                     title,
                     date,
-                    media_ids
+                    media_ids,
+                    ugoira_frame_duration,
+                    inserted_at
                 ) ",
             );
             q.push_values(&illust.history, |mut b, h| {
@@ -211,10 +217,21 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                     .push_bind(ext.map(|v| &v.illust_type))
                     .push_bind(ext.map(|v| &v.caption_html))
                     .push_bind(ext.map(|v| &v.title))
-                    .push_bind(ext.map(|v| v.date.as_ref().map(|t| t.to_chrono().naive_utc())))
-                    .push("(SELECT array_agg(id) FROM pixiv_media join unnest(")
+                    .push_bind(ext.map(|v| v.date.as_ref().map(|t| t.to_chrono())))
+                    .push(
+                        "
+                    (select array_agg(id order by i)
+                    from (SELECT id, urls.i i
+                          FROM pixiv_media
+                                   join unnest(",
+                    )
                     .push_bind_unseparated(ext.map(|v| &v.image_urls))
-                    .push_unseparated(") on unnest = pixiv_media.url)");
+                    .push_unseparated(
+                        ")
+                        with ordinality urls(url, i) using (url)) t)",
+                    )
+                    .push_bind(ext.map(|v| &v.ugoira_delay))
+                    .push_bind(h.last_modified.map(|dt| dt.to_chrono()));
             });
             // println!("{}", q.sql());
             q.build().execute(&mut tr).await?;
@@ -266,11 +283,12 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             parent_id,
             source_id,
             source_inaccessible,
-            last_modified,
+            updated_at,
             total_bookmarks,
             total_view,
             is_bookmarked,
-            tag_ids
+            tag_ids,
+            inserted_at
         ) VALUES (
             (SELECT id FROM pixiv_user WHERE source_id = $1),
             $2,
@@ -279,16 +297,18 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             $5,
             $6,
             $7,
-            (SELECT array_agg(id) FROM pixiv_tag WHERE alias && $8::varchar[])
+            (SELECT array_agg(id) FROM pixiv_tag WHERE alias && $8::varchar[]),
+            $9
         ) RETURNING id",
             parent.as_ref().map(|v| v.source_id.as_ref().unwrap()),
             novel.source_id.as_ref(),
             novel.source_inaccessible,
-            novel.last_modified.map(|dt| dt.to_chrono().naive_utc()),
+            novel.last_modified.map(|dt| dt.to_chrono()),
             novel.extension.as_ref().map(|v| v.total_bookmarks as i32),
             novel.extension.as_ref().map(|v| v.total_view as i32),
             novel.extension.as_ref().map(|v| v.is_bookmarked),
-            alias.as_slice()
+            alias.as_slice(),
+            novel._id.map(|o| o.timestamp().to_chrono()),
         )
         .fetch_one(&mut tr)
         .await?
@@ -296,12 +316,14 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
 
         if !novel.history.is_empty() {
             let mut q = QueryBuilder::new(
-                "INSERT INTO pixiv_novel_history (
+                "
+                INSERT INTO pixiv_novel_history (
                     item_id,
                     caption_html,
                     title,
                     date,
-                    text
+                    text,
+                    inserted_at
                 ) ",
             );
             q.push_values(&novel.history, |mut b, h| {
@@ -309,8 +331,9 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                 b.push_bind(id)
                     .push_bind(ext.map(|v| &v.caption_html))
                     .push_bind(ext.map(|v| &v.title))
-                    .push_bind(ext.map(|v| v.date.as_ref().map(|t| t.to_chrono().naive_utc())))
-                    .push_bind(ext.map(|v| &v.text));
+                    .push_bind(ext.map(|v| v.date.as_ref().map(|t| t.to_chrono())))
+                    .push_bind(ext.map(|v| &v.text))
+                    .push_bind(h.last_modified.map(|dt| dt.to_chrono()));
             });
             // println!("{}", q.sql());
             q.build().execute(&mut tr).await?;
@@ -323,6 +346,7 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let (mongo, pg) = get_db().await?;
+    bowerbird_core::migrate(&pg).await?;
     let t = Instant::now();
     images(&mongo, &pg).await?;
     println!("images: {:?}", t.elapsed());
