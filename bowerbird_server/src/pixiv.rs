@@ -103,11 +103,12 @@ async fn find_image_media(
 
 #[derive(Debug, Clone, Deserialize)]
 struct FindTagForm {
-    search: String,
+    ids: Option<Vec<i32>>,
+    search: Option<String>,
     limit: u16,
     offset: u16,
 }
-#[post("/find/tag/search")]
+#[post("/find/tag")]
 async fn find_tag_search(db: Data<PgPool>, form: Json<FindTagForm>) -> Result<Json<Vec<Tag>>> {
     let form = form.into_inner();
 
@@ -115,14 +116,20 @@ async fn find_tag_search(db: Data<PgPool>, form: Json<FindTagForm>) -> Result<Js
         "
         select alias, id
         from pixiv_tag
-        where id in (select distinct id
-             from (select id, unnest(alias) tag
-                   from pixiv_tag) x
-             where tag like $1)
-        limit $2 offset $3
+        where ($1 is null or id = any ($1))
+          and ($2 is null or id in (select distinct id
+                                    from (select id, unnest(alias) tag
+                                          from pixiv_tag) t
+                                    where tag ilike $2))
+        limit $3 offset $4
         ",
     )
-    .bind(format!("%{}%", form.search))
+    .bind(form.ids)
+    .bind(
+        form.search
+            .filter(|v| !v.is_empty())
+            .map(|v| format!("%{}%", v)),
+    )
     .bind(form.limit as i32)
     .bind(form.offset as i32)
     .fetch_all(db.as_ref())
