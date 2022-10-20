@@ -1,9 +1,10 @@
 mod model;
 use bson::doc;
+use chrono::NaiveDate;
 use futures::TryStreamExt;
 use mongodb::Database;
 use sqlx::{query, Pool, Postgres};
-use std::{env::var, time::Instant};
+use std::{collections::BTreeMap, env::var, time::Instant};
 
 use crate::model::{
     pixiv::{PixivIllust, PixivNovel, PixivUser},
@@ -70,7 +71,7 @@ async fn users(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
 
         let mut query_builder = QueryBuilder::new(
                 "insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
-                    gender, comment, twitter_account, web_page, workspace)",
+                    gender, comment, twitter_account, web_page, workspace, name, account, is_premium)",
             );
         query_builder.push_values(&user.history, |mut b, h| {
             let ext = h.extension.as_ref();
@@ -88,20 +89,21 @@ async fn users(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                 .push_bind(h.last_modified.map(|dt| dt.to_chrono()))
                 // 2001-04-03
                 .push_bind(ext.map(|v| {
-                    v.birth.as_ref().map(|t| {
-                        chrono::NaiveDate::from_ymd(
-                            t[..4].parse().unwrap(),
-                            t[5..7].parse().unwrap(),
-                            t[8..10].parse().unwrap(),
-                        )
-                    })
+                    v.birth
+                        .as_ref()
+                        .and_then(|t| NaiveDate::parse_from_str(t, "%Y-%m-%d").ok())
                 }))
                 .push_bind(ext.map(|v| &v.region))
                 .push_bind(ext.map(|v| &v.gender))
                 .push_bind(ext.map(|v| &v.comment))
                 .push_bind(ext.map(|v| &v.twitter_account))
                 .push_bind(ext.map(|v| &v.web_page))
-                .push_bind(ext.map(|v| serde_json::to_value(v.workspace.as_ref()).unwrap()));
+                .push_bind(ext.map(|v| {
+                    serde_json::to_value(v.workspace.as_ref().unwrap_or(&BTreeMap::new())).unwrap()
+                }))
+                .push_bind(ext.map(|v| &v.name))
+                .push_bind(ext.map(|v| &v.account))
+                .push_bind(ext.map(|v| v.is_premium));
         });
         let query = query_builder.build();
         query.execute(&mut tr).await?;
@@ -221,14 +223,13 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                     .push(
                         "
                     (select array_agg(id order by i)
-                    from (SELECT id, urls.i i
-                          FROM pixiv_media
-                                   join unnest(",
+                     from pixiv_media
+                        join unnest(",
                     )
                     .push_bind_unseparated(ext.map(|v| &v.image_urls))
                     .push_unseparated(
                         ")
-                        with ordinality urls(url, i) using (url)) t)",
+                        with ordinality urls(url, i) using (url))",
                     )
                     .push_bind(ext.map(|v| &v.ugoira_delay))
                     .push_bind(h.last_modified.map(|dt| dt.to_chrono()));

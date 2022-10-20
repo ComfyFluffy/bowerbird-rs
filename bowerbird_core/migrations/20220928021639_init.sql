@@ -78,6 +78,9 @@ create table pixiv_user_history
         constraint pixiv_user_history_pixiv_media_null_fk_avatar_id
             references pixiv_media,
     inserted_at        timestamp with time zone default now(),
+    account            varchar(128),
+    name               varchar(128),
+    is_premium         boolean,
     birth              date,
     region             varchar(64),
     gender             varchar(8),
