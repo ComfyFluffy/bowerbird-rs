@@ -87,7 +87,7 @@ async fn update_tags(
     db: &PgPool,
     // mut on_id_returned: Option<impl FnMut(&Vec<String>, i32)>,
 ) -> crate::Result<()> {
-    let tags: Vec<Vec<String>> = flatten_tags_and_insert(tags)
+    let tags: BTreeSet<Vec<String>> = flatten_tags_and_insert(tags)
         .into_iter()
         .map(|x| x.into_iter().map(|x| x.to_string()).collect())
         .collect();
