@@ -1,7 +1,7 @@
 use aria2_ws::TaskOptions;
 use bowerbird_utils::{
     downloader::{Task, TaskHooks},
-    get_dimensions_and_palette, try_skip,
+    get_image_metadata, try_skip,
 };
 use futures::FutureExt;
 use lazy_static::lazy_static;
@@ -107,26 +107,25 @@ async fn on_success_illust(
         .len()
         .try_into()
         .unwrap_or_default();
-    let ((w, h), hsv_v) = {
+    let img_metadata = match {
         let image_path = path.as_ref().to_owned();
-        spawn_blocking(move || get_dimensions_and_palette(image_path))
+        spawn_blocking(move || get_image_metadata(image_path))
     }
     .await
-    .unwrap()?;
+    .unwrap()
+    {
+        Ok(m) => Some(m),
+        Err(e) => {
+            warn!(
+                "image error: failed to get metadata for {}: {}",
+                &path.as_ref().to_string_lossy(),
+                e
+            );
+            None
+        }
+    };
 
-    save_image(
-        &db,
-        size,
-        (
-            w.try_into().unwrap_or_default(),
-            h.try_into().unwrap_or_default(),
-        ),
-        hsv_v,
-        url,
-        path,
-        path_db,
-    )
-    .await?;
+    save_image(&db, size, img_metadata, url, path, path_db).await?;
 
     Ok(())
 }

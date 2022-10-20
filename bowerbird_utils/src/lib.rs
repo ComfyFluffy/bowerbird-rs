@@ -33,7 +33,14 @@ where
 
 pub type Hsv = [f32; 3];
 
-pub fn get_dimensions_and_palette(image_path: impl AsRef<Path>) -> Result<((u32, u32), Vec<Hsv>)> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageMetadata {
+    pub hsv_palette: Vec<Hsv>,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub fn get_image_metadata(image_path: impl AsRef<Path>) -> Result<ImageMetadata> {
     let img = image::open(image_path).context(error::Image)?;
     let dim = img.dimensions();
     let thumbnail = img.thumbnail(512, 512).to_rgba8();
@@ -44,7 +51,11 @@ pub fn get_dimensions_and_palette(image_path: impl AsRef<Path>) -> Result<((u32,
         .into_iter()
         .map(|c| rgb_to_hsv(c.r, c.g, c.b))
         .collect();
-    Ok((dim, hsv_v))
+    Ok(ImageMetadata {
+        hsv_palette: hsv_v,
+        width: dim.0,
+        height: dim.1,
+    })
 }
 
 pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> Hsv {

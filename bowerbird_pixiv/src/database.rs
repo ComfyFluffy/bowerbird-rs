@@ -1,4 +1,4 @@
-use bowerbird_utils::{try_skip, Hsv};
+use bowerbird_utils::{try_skip, ImageMetadata};
 use chrono::{Duration, Utc};
 use log::{info, warn};
 use path_slash::PathBufExt;
@@ -327,14 +327,16 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
 pub async fn save_image(
     db: &PgPool,
     size: i32,
-    (w, h): (i32, i32),
-    palette_hsv: Vec<Hsv>,
+    img_metadata: Option<ImageMetadata>,
     url: String,
     path: impl AsRef<Path>,
     path_db: String,
 ) -> crate::Result<()> {
     let mime = mime_guess::from_path(path).first().map(|x| x.to_string());
     let mut tx = db.begin().await.context(error::Database)?;
+
+    let w: Option<i32> = img_metadata.as_ref().and_then(|x| x.width.try_into().ok());
+    let h: Option<i32> = img_metadata.as_ref().and_then(|x| x.height.try_into().ok());
     let id = query!(
         "
         update pixiv_media set
@@ -357,26 +359,29 @@ pub async fn save_image(
     .await
     .context(error::Database)?
     .id;
-    // Use insert into ... select ... where not exists ... to avoid duplicate.
-    let mut q = QueryBuilder::new(
-        "
+    if let Some(img_metadata) = img_metadata {
+        // Use insert into ... select ... where not exists ... to avoid duplicate.
+        let mut q = QueryBuilder::new(
+            "
         insert into pixiv_media_color (media_id, h, s, v)
         select * from (
             ",
-    );
-    q.push_values(palette_hsv, |mut b, v| {
-        b.push_bind(id);
-        b.push_bind(v[0]);
-        b.push_bind(v[1]);
-        b.push_bind(v[2]);
-    });
-    q.push(
-        "
+        );
+        q.push_values(img_metadata.hsv_palette, |mut b, v| {
+            b.push_bind(id);
+            b.push_bind(v[0]);
+            b.push_bind(v[1]);
+            b.push_bind(v[2]);
+        });
+        q.push(
+            "
         ) as data
         where not exists (select id from pixiv_media_color where media_id = $1)
         ",
-    );
-    q.build().execute(&mut tx).await.context(error::Database)?;
+        );
+        q.build().execute(&mut tx).await.context(error::Database)?;
+    }
+
     tx.commit().await.context(error::Database)?;
     Ok(())
 }
@@ -552,12 +557,11 @@ pub async fn save_illusts(
                 $4::varchar,
                 $5,
                 (select array_agg(id order by i)
-                from (SELECT id, urls.i i
-                      FROM pixiv_media
-                               join unnest(
-                                $6::varchar[]
-                          )
-                          with ordinality urls(url, i) using (url)) t),
+                 from pixiv_media
+                        join unnest(
+                            $6::varchar[]
+                        )
+                        with ordinality urls(url, i) using (url)),
                 $7
             where not exists (select id from pixiv_illust_history where 
                 item_id = $1 and illust_type = $2 and caption_html = $3 and title = $4 and date = $5
