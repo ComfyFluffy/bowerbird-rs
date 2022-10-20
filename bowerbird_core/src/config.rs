@@ -1,4 +1,4 @@
-use log::{debug, info, warn};
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::{
@@ -27,7 +27,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[serde(default)]
 pub struct Config {
     #[serde(skip)]
-    config_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
 
     pub postgres_uri: String,
     pub root_storage_dir: String,
@@ -99,6 +99,7 @@ impl Config {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Config> {
         debug!("loading config from: {:?}", path.as_ref());
         let path = path.as_ref();
+
         if !path.exists() {
             info!("creating config file: {}", path.to_string_lossy());
             let defaults = Config {
@@ -107,14 +108,14 @@ impl Config {
             };
 
             defaults.save()?;
-            Ok(defaults)
-        } else {
-            let file = File::open(path).context(IoSnafu)?;
-            let mut config_loaded: Config = serde_json::from_reader(file).context(JsonSnafu)?;
-            config_loaded.config_path = Some(PathBuf::from(path));
-            config_loaded.save()?;
-            Ok(config_loaded)
+            return Ok(defaults);
         }
+
+        let file = File::open(path).context(IoSnafu)?;
+        let mut config_loaded: Config = serde_json::from_reader(file).context(JsonSnafu)?;
+        config_loaded.config_path = Some(PathBuf::from(path));
+        config_loaded.save()?;
+        Ok(config_loaded)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -129,27 +130,18 @@ impl Config {
                 .open(path)
                 .context(IoSnafu)?;
             serde_json::to_writer_pretty(file, &self).context(JsonSnafu)?;
-        } else {
-            warn!("cannot save config without path");
+            return Ok(());
         }
-        Ok(())
+        PathNotSetSnafu.fail()
     }
 
+    /// If the given directory is relative, join the given path to the root storage directory
+    /// and return the joined path.
+    /// If the given directory is absolute, return it as is.
     pub fn sub_dir(&self, dir: impl AsRef<Path>) -> PathBuf {
         let dir = dir.as_ref();
         if dir.is_relative() {
-            let rel = PathBuf::from(&self.root_storage_dir).join(dir);
-            match rel.canonicalize() {
-                Ok(abs) => abs,
-                Err(e) => {
-                    warn!(
-                        "cannot canonicalize path: {}, error: {}",
-                        rel.to_string_lossy(),
-                        e
-                    );
-                    rel
-                }
-            }
+            PathBuf::from(&self.root_storage_dir).join(dir)
         } else {
             dir.to_owned()
         }
@@ -167,14 +159,96 @@ impl Config {
     }
 
     pub fn pxoxy_string(&self, url: &str) -> Option<String> {
-        if url.is_empty() {
-            if self.proxy_all.is_empty() {
-                None
-            } else {
-                Some(self.proxy_all.clone())
-            }
-        } else {
+        if !url.is_empty() {
+            Some(url.to_string())
+        } else if !self.proxy_all.is_empty() {
             Some(self.proxy_all.clone())
+        } else {
+            None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_log::test;
+
+    #[test]
+    fn test_save_defaults_error() {
+        // should raies PathNotSet error
+        let config = Config::default();
+        assert!(config.save().is_err());
+    }
+
+    #[test]
+    fn test_save_and_load_tempdir() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("config.json");
+        let config = Config {
+            config_path: Some(path.clone()),
+            aria2_path: "xxxxx".to_string(),
+            ..Default::default()
+        };
+        config.save().unwrap();
+        let config_loaded = Config::from_file(path).unwrap();
+        assert_eq!(config, config_loaded);
+    }
+
+    #[test]
+    fn test_from_nonexist_file() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("config.json");
+        let mut config = Config::from_file(path).unwrap();
+        config.config_path = None;
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn test_sub_dir_rel_abs() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("config.json");
+        let config = Config {
+            config_path: Some(path),
+            root_storage_dir: "/tmp".to_string(),
+            ..Default::default()
+        };
+        let sub_dir = config.sub_dir("/another/xxxx");
+        assert_eq!(sub_dir, PathBuf::from("/another/xxxx"));
+        let rel_sub_dir = config.sub_dir("rel/xxxx");
+        assert_eq!(rel_sub_dir, PathBuf::from("/tmp/rel/xxxx"));
+    }
+
+    #[test]
+    fn test_proxy() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("config.json");
+        let mut config = Config {
+            config_path: Some(path),
+            proxy_all: "http://127.0.0.1:1080".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(config.pxoxy_string("").unwrap(), config.proxy_all);
+        assert!(config.pxoxy("").unwrap().is_some());
+
+        assert_eq!(
+            config
+                .pxoxy_string("http://127.0.0.1:3242")
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1:3242"
+        );
+        assert!(config.pxoxy("http://127.0.0.1:3242").unwrap().is_some());
+
+        config.proxy_all = "".to_string();
+        assert_eq!(
+            config
+                .pxoxy_string("http://127.0.0.1:3242")
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1:3242"
+        );
+        assert!(config.pxoxy("").unwrap().is_none());
     }
 }
