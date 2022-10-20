@@ -13,6 +13,7 @@ pub struct Tag {
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq, FromRow)]
 pub struct Item<E, H> {
     pub id: i32,
+    #[sqlx(default)]
     pub parent_id: Option<i32>,
     pub source_id: Option<String>,
     pub source_inaccessible: bool,
@@ -23,6 +24,7 @@ pub struct Item<E, H> {
     #[sqlx(default)]
     pub updated_at: Option<DateTime<Utc>>,
 
+    #[sqlx(default)]
     pub tag_ids: Vec<i32>,
 
     #[sqlx(flatten)]

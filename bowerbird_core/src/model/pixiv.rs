@@ -17,6 +17,15 @@ pub struct User {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq, FromRow)]
+pub struct UserHistory {
+    pub name: Option<String>,
+    pub region: Option<String>,
+    pub comment: Option<String>,
+    pub avatar_path: Option<String>,
+    pub background_path: Option<String>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq, FromRow)]
 pub struct Works {
     pub total_bookmarks: i32,
     pub total_view: i32,
@@ -34,3 +43,4 @@ pub struct IllustHistory {
 }
 
 pub type PixivIllust = Item<Works, IllustHistory>;
+pub type PixivUser = Item<User, UserHistory>;

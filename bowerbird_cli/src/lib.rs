@@ -90,8 +90,9 @@ async fn run_internal() -> anyhow::Result<()> {
         let db = sqlx::PgPool::connect(&config.postgres_uri).await?;
 
         migrate(&db).await?;
+        let kit = PixivKit::new(config, db).await?;
 
-        Ok((config, db)) as anyhow::Result<_>
+        anyhow::Ok(kit)
     };
 
     match opts.subcommand {
@@ -100,8 +101,8 @@ async fn run_internal() -> anyhow::Result<()> {
             info!("migration finished");
         }
         SubcommandMain::Serve => {
-            let (config, db) = pre_fn.await?;
-            bowerbird_server::run(db, config).await?;
+            let kit = pre_fn.await?;
+            bowerbird_server::run(kit).await?;
         }
         SubcommandMain::Init => {
             config_builder()?;
@@ -110,14 +111,13 @@ async fn run_internal() -> anyhow::Result<()> {
             let user_id = c.user_id;
             let limit = c.limit;
             let pre_fn = async move {
-                let (config, db) = pre_fn.await?;
-                let kit = PixivKit::new(config, db).await?;
+                let kit = pre_fn.await?;
                 let target_user_id = if let Some(user_id) = user_id {
                     user_id
                 } else {
                     kit.current_user_id().to_string()
                 };
-                Ok((kit, target_user_id)) as anyhow::Result<(PixivKit, String)>
+                anyhow::Ok((kit, target_user_id))
             };
             match &c.subcommand {
                 SubcommandPixiv::Illust(c) => match &c.subcommand {
