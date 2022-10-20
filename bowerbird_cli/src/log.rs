@@ -38,18 +38,28 @@ impl Encode for ConsoleEncoder {
     }
 }
 
-pub fn init_log4rs() -> anyhow::Result<()> {
-    let console_level = var("BOWERBIRD_CONSOLE_LOG_LEVEL")
+fn level_from_env(key: &str, default: log::LevelFilter) -> log::LevelFilter {
+    var(key)
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(log::LevelFilter::Info);
+        .unwrap_or(default)
+}
+
+pub fn init_log4rs() -> anyhow::Result<()> {
+    let console_level = level_from_env("BOWERBIRD_CONSOLE_LOG_LEVEL", log::LevelFilter::Info);
+    let console_level_root =
+        level_from_env("BOWERBIRD_CONSOLE_LOG_LEVEL_ALL", log::LevelFilter::Warn);
     let console_out = ConsoleAppender::builder()
         .encoder(Box::new(ConsoleEncoder))
         .build();
     let config = Config::builder()
         .appender(Appender::builder().build("console", Box::new(console_out)))
-        .logger(Logger::builder().build("bowerbird", log::LevelFilter::Debug))
-        .build(Root::builder().appender("console").build(console_level))?;
+        .logger(Logger::builder().build("bowerbird", console_level))
+        .build(
+            Root::builder()
+                .appender("console")
+                .build(console_level_root),
+        )?;
     log4rs::init_config(config)?;
     Ok(())
 }
