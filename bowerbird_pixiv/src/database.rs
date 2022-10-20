@@ -16,6 +16,13 @@ use super::PixivKit;
 type QueryBuilder<'a> = sqlx::QueryBuilder<'a, Postgres>;
 pub(crate) type Transaction = sqlx::Transaction<'static, Postgres>;
 
+/// Equal, treating null as a comparable value.
+///
+/// Used for upserting.
+///
+/// https://www.postgresql.org/docs/current/functions-comparison.html
+const NULL_EQ: &str = "IS NOT DISTINCT FROM";
+
 async fn update_users(
     users: impl Iterator<Item = &pixivcrab::models::user::User>,
     db: &PgPool,
@@ -277,15 +284,19 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         download_other_images("workspace", workspace_image_url, kit).await?;
     }
 
-    query!(
-        "
+    let workspace_image_id = "(select id from pixiv_media where url = $2)";
+    let background_id = "(select id from pixiv_media where url = $3)";
+    let avatar_id = "(select id from pixiv_media where url = $4)";
+    let eq = NULL_EQ;
+    query(
+        &format!("
         insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
             gender, comment, twitter_account, web_page, workspace)
         select 
             $1,
-            (select id from pixiv_media where url = $2),
-            (select id from pixiv_media where url = $3),
-            (select id from pixiv_media where url = $4),
+            {workspace_image_id},
+            {background_id},
+            {avatar_id},
             now(),
             $5,
             $6::varchar,
@@ -295,31 +306,36 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
             $10::varchar,
             $11
         where not exists (
-            select id from pixiv_user_history where item_id = $1
-            and workspace_image_id = (select id from pixiv_media where url = $2)
-            and background_id = (select id from pixiv_media where url = $3)
-            and avatar_id = (select id from pixiv_media where url = $4)
-            and birth = $5
-            and region = $6
-            and gender = $7
-            and comment = $8
-            and twitter_account = $9
-            and web_page = $10
-            and workspace = $11
-        )
-        ",
-        id,
-        workspace_image_url,
-        background_url,
-        avatar_url,
-        parse_birth(&profile.birth),
-        profile.region,
-        profile.gender,
-        user.comment,
-        profile.twitter_account,
-        profile.webpage,
-        serde_json::to_value(&workspace).unwrap_or_default()
-    ).execute(&mut tx).await.context(error::Database)?;
+            select id from pixiv_user_history where
+            item_id = $1
+            and workspace_image_id {eq} {workspace_image_id}
+            and background_id {eq} {background_id}
+            and avatar_id {eq} {avatar_id}
+            and birth {eq} $5
+            and region {eq} $6
+            and gender {eq} $7
+            and comment {eq} $8
+            and twitter_account {eq} $9
+            and web_page {eq} $10
+            and workspace {eq} $11
+            )
+        "),
+    )
+    .bind(id)
+    .bind(workspace_image_url)
+    .bind(background_url)
+    .bind(avatar_url)
+    .bind(parse_birth(&profile.birth))
+    .bind(profile.region)
+    .bind(profile.gender)
+    .bind(user.comment)
+    .bind(profile.twitter_account)
+    .bind(profile.webpage)
+    .bind(serde_json::to_value(&workspace).unwrap_or_default())
+    .execute(&mut tx)
+    .await
+    .context(error::Database)?;
+
     tx.commit().await.context(error::Database)?;
     Ok(())
 }
@@ -361,17 +377,18 @@ pub async fn save_image(
     .id;
     if let Some(img_metadata) = img_metadata {
         // Use insert into ... select ... where not exists ... to avoid duplicate.
+        // TODO: use upsert
         let mut q = QueryBuilder::new(
             "
         insert into pixiv_media_color (media_id, h, s, v)
         select * from (
             ",
         );
-        q.push_values(img_metadata.hsv_palette, |mut b, v| {
+        q.push_values(img_metadata.hsv_palette, |mut b, hsv| {
             b.push_bind(id);
-            b.push_bind(v[0]);
-            b.push_bind(v[1]);
-            b.push_bind(v[2]);
+            for v in hsv {
+                b.push_bind(v);
+            }
         });
         q.push(
             "
@@ -547,8 +564,17 @@ pub async fn save_illusts(
         q.push(" on conflict (url) do nothing");
         q.build().execute(&mut tx).await.context(error::Database)?;
 
-        query!(
-            "
+        let media_ids = "
+        (select array_agg(id order by i)
+        from pixiv_media
+               join unnest(
+                   $6::varchar[]
+               )
+               with ordinality urls(url, i) using (url))
+        ";
+        let eq = NULL_EQ;
+        query(
+            &format!("
             insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, media_ids, ugoira_frame_duration)
             select
                 $1,
@@ -556,29 +582,31 @@ pub async fn save_illusts(
                 $3,
                 $4::varchar,
                 $5,
-                (select array_agg(id order by i)
-                 from pixiv_media
-                        join unnest(
-                            $6::varchar[]
-                        )
-                        with ordinality urls(url, i) using (url)),
+                {media_ids},
                 $7
-            where not exists (select id from pixiv_illust_history where 
-                item_id = $1 and illust_type = $2 and caption_html = $3 and title = $4 and date = $5
-                and media_ids = (SELECT array_agg(id) FROM pixiv_media join unnest(
-                    $6::varchar[]
-                ) on unnest = pixiv_media.url)
-                and ugoira_frame_duration = $7
+            where not exists (
+                select id from pixiv_illust_history where 
+                item_id = $1
+                and illust_type {eq} $2
+                and caption_html {eq} $3
+                and title {eq} $4
+                and date {eq} $5
+                and media_ids {eq} {media_ids}
+                and ugoira_frame_duration {eq} $7
             )
-            ",
-            item_id,
-            i.r#type,
-            i.caption,
-            i.title,
-            i.create_date,
-            &urls,
-            delay_slice
-        ).execute(&mut tx).await.context(error::Database)?;
+            ")
+        )
+        .bind(item_id)
+        .bind(&i.r#type)
+        .bind(&i.caption)
+        .bind(&i.title)
+        .bind(i.create_date)
+        .bind(&urls)
+        .bind(delay_slice)
+        .execute(&mut tx)
+        .await
+        .context(error::Database)?;
+
         tx.commit().await.context(error::Database)?;
     }
     Ok(())
@@ -671,7 +699,8 @@ pub async fn save_novels(
             continue;
         }
 
-        query!(
+        let eq = NULL_EQ;
+        query(&format!(
             "
             insert into pixiv_novel_history (item_id, title, date, caption_html, text)
             select
@@ -680,16 +709,21 @@ pub async fn save_novels(
                 $3,
                 $4,
                 $5
-            where not exists (select id from pixiv_novel_history where 
-                item_id = $1 and title = $2 and date = $3 and caption_html = $4 and text = $5
+            where not exists (
+                select id from pixiv_novel_history where 
+                item_id = $1
+                and title {eq} $2
+                and date {eq} $3
+                and caption_html {eq} $4
+                and text {eq} $5
             )
-            ",
-            item_id,
-            n.title,
-            n.create_date.naive_utc(),
-            n.caption,
-            r.novel_text
-        )
+            "
+        ))
+        .bind(item_id)
+        .bind(&n.title)
+        .bind(n.create_date.naive_utc())
+        .bind(&n.caption)
+        .bind(r.novel_text)
         .execute(&mut tx)
         .await
         .context(error::Database)?;
