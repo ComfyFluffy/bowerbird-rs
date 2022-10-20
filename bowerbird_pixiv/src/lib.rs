@@ -7,7 +7,6 @@ use snafu::ResultExt;
 use sqlx::PgPool;
 use std::{
     collections::{BTreeSet, HashMap},
-    env::var,
     path::PathBuf,
 };
 
@@ -58,7 +57,7 @@ impl PixivKit {
             debug!("pixiv api proxy set: {:?}", proxy);
             api_client = api_client.proxy(proxy);
         }
-        if var("BOWERBIRD_ACCEPT_INVALID_CERTS").is_ok() {
+        if config.accept_invalid_certs {
             warn!("invalid certs will be accepted for pixiv api requests");
             api_client = api_client.danger_accept_invalid_certs(true);
         }

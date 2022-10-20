@@ -5,6 +5,7 @@ use std::{
     fs::{File, OpenOptions},
     net::SocketAddr,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 #[derive(Snafu, Debug)]
@@ -29,6 +30,7 @@ pub struct Config {
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
 
+    pub accept_invalid_certs: bool,
     pub postgres_uri: String,
     pub root_storage_dir: String,
     pub proxy_all: String,
@@ -51,6 +53,7 @@ impl Default for Config {
             proxy_all: "".to_string(),
             ffmpeg_path: "".to_string(),
             aria2_path: "aria2c".to_string(),
+            accept_invalid_certs: false,
             pixiv: PixivConfig::default(),
             server: ServerConfig::default(),
         }
@@ -65,6 +68,9 @@ pub struct PixivConfig {
     pub proxy_download: String,
     pub refresh_token: String,
     pub language: String,
+
+    pub user_update_interval_threshold: usize,
+    pub user_update_interval: Duration,
 }
 
 impl Default for PixivConfig {
@@ -75,6 +81,8 @@ impl Default for PixivConfig {
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
             language: "en".to_string(),
+            user_update_interval_threshold: 100,
+            user_update_interval: Duration::from_secs(1),
         }
     }
 }
@@ -176,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_save_defaults_error() {
-        // should raies PathNotSet error
+        // should raise PathNotSet error
         let config = Config::default();
         assert!(config.save().is_err());
     }

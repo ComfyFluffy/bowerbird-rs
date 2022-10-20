@@ -7,7 +7,6 @@ use sqlx::{query, PgPool, Postgres};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     convert::TryInto,
-    env::var,
     path::{Path, PathBuf},
 };
 
@@ -185,20 +184,12 @@ pub async fn update_user_id_set(
     users_need_update_set: BTreeSet<String>,
     kit: &PixivKit,
 ) -> crate::Result<()> {
-    let sleep_threshold = var("PIXIV_USER_UPDATE_SLEEP_THRESHOLD")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(100);
-    let sleep_millis = var("PIXIV_USER_UPDATE_SLEEP_MILIS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(500);
-    let need_sleep = users_need_update_set.len() > sleep_threshold;
+    let need_sleep = users_need_update_set.len() > kit.config.pixiv.user_update_interval_threshold;
     // Sleep for 500ms to avoid 403 error
     for user_id in users_need_update_set {
         try_skip!(update_user_detail(&user_id, kit).await);
         if need_sleep {
-            tokio::time::sleep(std::time::Duration::from_millis(sleep_millis)).await;
+            tokio::time::sleep(kit.config.pixiv.user_update_interval).await;
         }
     }
     Ok(())
