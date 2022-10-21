@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use chrono::NaiveDate;
 use futures::TryStreamExt;
-use log::{debug, warn};
+use log::warn;
 use pixivcrab::Pager;
 use serde::de::DeserializeOwned;
 use snafu::ResultExt;
@@ -89,7 +89,6 @@ where
         tries += 1;
         match pager.try_next().await.context(error::PixivApi) {
             Ok(r) => {
-                debug!("got response: {:?}", r);
                 return Ok(r);
             }
             Err(e) => {

@@ -240,7 +240,6 @@ mod tests {
     #[tokio::test]
     async fn test_illusts() {
         dotenvy::dotenv().ok();
-        bowerbird_cli::log::init_log4rs().unwrap();
         let uid = var("TEST_PIXIV_USER_ID").unwrap();
         let db = PgPool::connect(&var("DATABASE_URL").unwrap())
             .await

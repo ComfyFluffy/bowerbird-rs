@@ -1,7 +1,7 @@
 use chrono::Local;
 use colored::Colorize;
 use log4rs::{
-    append::console::ConsoleAppender,
+    append::console::{ConsoleAppender, Target},
     config::{Appender, Config, Logger, Root},
     encode::Encode,
 };
@@ -32,7 +32,9 @@ impl Encode for ConsoleEncoder {
             _ => (level.as_str().into(), msg.as_str().into()),
         };
 
-        write!(w, "\n{date} [{level}] {msg}\n")?;
+        let module = record.module_path().unwrap_or_default().bright_black();
+
+        write!(w, "\n{date} {module} [{level}] {msg}\n")?;
 
         Ok(())
     }
@@ -51,10 +53,15 @@ pub fn init_log4rs() -> anyhow::Result<()> {
         level_from_env("BOWERBIRD_CONSOLE_LOG_LEVEL_ALL", log::LevelFilter::Warn);
     let console_out = ConsoleAppender::builder()
         .encoder(Box::new(ConsoleEncoder))
+        .target(Target::Stderr)
         .build();
     let config = Config::builder()
         .appender(Appender::builder().build("console", Box::new(console_out)))
-        .logger(Logger::builder().build("bowerbird", console_level))
+        .logger(Logger::builder().build("bowerbird_cli", console_level))
+        .logger(Logger::builder().build("bowerbird_core", console_level))
+        .logger(Logger::builder().build("bowerbird_server", console_level))
+        .logger(Logger::builder().build("bowerbird_pixiv", console_level))
+        .logger(Logger::builder().build("bowerbird_utils", console_level))
         .build(
             Root::builder()
                 .appender("console")
