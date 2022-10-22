@@ -1,9 +1,11 @@
 use ::log::{debug, warn};
 use image::GenericImageView;
+use reqwest::ClientBuilder;
 use snafu::ResultExt;
 use std::{
     net::TcpListener,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 use tokio::{process::Command, time::timeout};
@@ -141,4 +143,21 @@ pub async fn check_ffmpeg(path: &str) -> Option<PathBuf> {
             None
         }
     }
+}
+
+pub fn logged_rustls_with_native_root(client: ClientBuilder) -> Result<ClientBuilder> {
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_native_certs::load_native_certs().context(error::LoadCertsIo)? {
+        roots
+            .add(&rustls::Certificate(cert.0))
+            .context(error::RustlsParseCerts)?;
+    }
+
+    let mut tls = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    tls.key_log = Arc::new(rustls::KeyLogFile::new());
+
+    Ok(client.use_preconfigured_tls(tls))
 }

@@ -1,6 +1,6 @@
 use bowerbird_core::config::Config;
-use bowerbird_utils::{check_ffmpeg, downloader::Aria2Downloader};
-use log::{debug, info, warn};
+use bowerbird_utils::{check_ffmpeg, downloader::Aria2Downloader, logged_rustls_with_native_root};
+use log::{debug, info};
 use pixivcrab::AppApi;
 use reqwest::ClientBuilder;
 use snafu::ResultExt;
@@ -49,7 +49,10 @@ pub struct PixivKit {
 impl PixivKit {
     /// Log in to pixiv, save token, start aria2, and check ffmpeg.
     pub async fn new(mut config: Config, db: PgPool) -> crate::Result<Self> {
-        let mut api_client = ClientBuilder::new();
+        let mut api_client = ClientBuilder::new().cookie_store(true);
+        if config.ssl_key_log {
+            api_client = logged_rustls_with_native_root(api_client).context(error::Utils)?;
+        }
         if let Some(proxy) = config
             .pxoxy(&config.pixiv.proxy_api)
             .context(error::Config)?
@@ -57,14 +60,12 @@ impl PixivKit {
             debug!("pixiv api proxy set: {:?}", proxy);
             api_client = api_client.proxy(proxy);
         }
-        if config.accept_invalid_certs {
-            warn!("invalid certs will be accepted for pixiv api requests");
-            api_client = api_client.danger_accept_invalid_certs(true);
-        }
-        let api = pixivcrab::AppApi::new(
+        let mut api_config = pixivcrab::AppApiConfig::default();
+        api_config.set_language(&config.pixiv.language);
+        let api = pixivcrab::AppApi::new_with_config(
             pixivcrab::AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
-            &config.pixiv.language,
             api_client,
+            api_config,
         )
         .context(error::PixivApi)?;
         let auth_result = api.auth().await.context(error::PixivApi)?;

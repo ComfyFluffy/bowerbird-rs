@@ -30,7 +30,7 @@ pub struct Config {
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
 
-    pub accept_invalid_certs: bool,
+    pub ssl_key_log: bool,
     pub postgres_uri: String,
     pub root_storage_dir: String,
     pub proxy_all: String,
@@ -53,7 +53,7 @@ impl Default for Config {
             proxy_all: "".to_string(),
             ffmpeg_path: "".to_string(),
             aria2_path: "aria2c".to_string(),
-            accept_invalid_certs: false,
+            ssl_key_log: false,
             pixiv: PixivConfig::default(),
             server: ServerConfig::default(),
         }

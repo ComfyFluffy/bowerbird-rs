@@ -265,7 +265,7 @@ pub async fn download_illusts(
                 )
                 .await
                 {
-                    warn!("Fail to build task from {}: {}", zip_url, err);
+                    warn!("fail to build task from {}: {}", zip_url, err);
                 }
             }
         }

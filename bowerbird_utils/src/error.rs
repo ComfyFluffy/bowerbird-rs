@@ -25,4 +25,10 @@ pub enum Error {
 
     #[snafu(display("image: {source}"))]
     ImageError { source: image::ImageError },
+
+    #[snafu(display("loading system certifcates: {source}"))]
+    LoadCertsIo { source: std::io::Error },
+
+    #[snafu(display("parsing system certifcates: {source}"))]
+    RustlsParseCerts { source: webpki::Error },
 }
