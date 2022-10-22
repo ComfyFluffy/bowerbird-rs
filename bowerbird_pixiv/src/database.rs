@@ -1,6 +1,6 @@
 use bowerbird_utils::{try_skip, ImageMetadata};
 use chrono::{Duration, Utc};
-use log::{info, warn};
+use log::{debug, info, warn};
 use path_slash::PathBufExt;
 use snafu::ResultExt;
 use sqlx::{query, PgPool, Postgres};
@@ -22,6 +22,23 @@ pub(crate) type Transaction = sqlx::Transaction<'static, Postgres>;
 ///
 /// https://www.postgresql.org/docs/current/functions-comparison.html
 const NULL_EQ: &str = "IS NOT DISTINCT FROM";
+
+macro_rules! preprocess_items {
+    ($items:expr, $db:expr, $on_user_need_update:expr) => {
+        update_tags($items.iter().flat_map(|x| &x.tags), $db).await?;
+        update_users(
+            $items
+                .iter()
+                .filter_map(|x| Some(&x.user).filter(|u| u.id != 0))
+                .collect::<HashSet<_>>()
+                .into_iter(),
+            $db,
+            Duration::seconds(60), // TODO: use env var
+            $on_user_need_update,
+        )
+        .await?;
+    };
+}
 
 async fn update_users(
     users: impl Iterator<Item = &pixivcrab::models::user::User>,
@@ -69,7 +86,7 @@ async fn update_users(
         .context(error::Database)?
         .and_then(|row| row.url);
 
-        let user_up_to_date = || {
+        let user_up_to_date = (|| {
             if Some(&user.profile_image_urls.medium) != avatar_url.as_ref() {
                 return false;
             }
@@ -79,9 +96,10 @@ async fn update_users(
             } else {
                 false
             }
-        };
+        })();
+        debug!("{user:?}: {user_up_to_date}, {updated_at:?}, {avatar_url:?}");
         // Do not insert to update list if updated within the given duration and the avatar is up-to-date.
-        if !user_up_to_date() {
+        if !user_up_to_date {
             on_need_update(&user_id);
         }
     }
@@ -94,7 +112,7 @@ async fn update_tags(
     db: &PgPool,
     // mut on_id_returned: Option<impl FnMut(&Vec<String>, i32)>,
 ) -> crate::Result<()> {
-    let tags: BTreeSet<Vec<String>> = flatten_tags_and_insert(tags)
+    let tags: HashSet<Vec<String>> = flatten_tags_and_insert(tags)
         .into_iter()
         .map(|x| x.into_iter().map(|x| x.to_string()).collect())
         .collect();
@@ -209,6 +227,7 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         .user_detail(user_id)
         .await
         .context(error::PixivApi)?;
+    debug!("pixiv user data: {:?}", resp);
 
     let user = resp.user;
     let profile = resp.profile;
@@ -216,25 +235,20 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
 
     let id = query!(
         "
-        insert into pixiv_user (source_id, source_inaccessible, updated_at, is_followed, total_following,
-            total_illust_series, total_illusts, total_manga, total_novel_series, total_novels,
-            total_public_bookmarks) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        on conflict (source_id) do update set
-            source_inaccessible = $2,
-            updated_at = $3,
-            is_followed = $4,
-            total_following = $5,
-            total_illust_series = $6,
-            total_illusts = $7,
-            total_manga = $8,
-            total_novel_series = $9,
-            total_novels = $10,
-            total_public_bookmarks = $11
+        update pixiv_user set
+            updated_at = now(),
+            source_inaccessible = false,
+            is_followed = $1,
+            total_following = $2,
+            total_illust_series = $3,
+            total_illusts = $4,
+            total_manga = $5,
+            total_novel_series = $6,
+            total_novels = $7,
+            total_public_bookmarks = $8
+        where source_id = $9
         returning id
         ",
-        user_id,
-        false,
-        Utc::now(),
         user.is_followed,
         profile.total_follow_users,
         profile.total_illust_series,
@@ -242,8 +256,13 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         profile.total_manga,
         profile.total_novel_series,
         profile.total_novels,
-        profile.total_illust_bookmarks_public
-    ).fetch_one(&mut tx).await.context(error::Database)?.id;
+        profile.total_illust_bookmarks_public,
+        user_id
+    )
+    .fetch_one(&mut tx)
+    .await
+    .context(error::Database)?
+    .id;
 
     fn not_empty(s: &String) -> bool {
         !s.is_empty()
@@ -256,10 +275,14 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
     let avatar_url = Some(user.profile_image_urls.medium).filter(not_empty);
     let background_url = profile.background_image_url.filter(not_empty);
 
-    let workspace: BTreeMap<String, String> = workspace
-        .into_iter()
-        .filter_map(|(k, v)| v.filter(not_empty).map(|v| (k, v)))
-        .collect();
+    // Remove empty fields of workspace
+    let workspace = Some(
+        workspace
+            .into_iter()
+            .filter_map(|(k, v)| v.filter(not_empty).map(|v| (k, v)))
+            .collect::<BTreeMap<String, String>>(),
+    )
+    .and_then(|m| serde_json::to_value(m).ok());
 
     {
         let urls = [&workspace_image_url, &avatar_url, &background_url]
@@ -274,6 +297,76 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         q.build().execute(&mut tx).await.context(error::Database)?;
     }
 
+    let comment = user.comment.filter(not_empty);
+    let gender = Some(profile.gender).filter(not_empty);
+    let twitter_account = profile.twitter_account.filter(not_empty);
+    let web_page = profile.webpage.filter(not_empty);
+    let region = profile.region.filter(not_empty);
+
+    let workspace_image_id = "(select id from pixiv_media where url = $2)";
+    let background_id = "(select id from pixiv_media where url = $3)";
+    let avatar_id = "(select id from pixiv_media where url = $4)";
+    let eq = NULL_EQ;
+    query(
+        &format!("
+            insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, account,
+                name, is_premium, birth, region, gender, comment, twitter_account, web_page,
+                workspace)
+            select 
+                $1,
+                {workspace_image_id},
+                {background_id},
+                {avatar_id},
+                now(),
+                $5::varchar,
+                $6::varchar,
+                $7,
+                $8,
+                $9::varchar,
+                $10::varchar,
+                $11,
+                $12::varchar,
+                $13::varchar,
+                $14
+            where not exists (
+                select id from pixiv_user_history where
+                item_id = $1
+                and workspace_image_id {eq} {workspace_image_id}
+                and background_id {eq} {background_id}
+                and avatar_id {eq} {avatar_id}
+                and account {eq} $5
+                and name {eq} $6
+                and is_premium {eq} $7
+                and birth {eq} $8
+                and region {eq} $9
+                and gender {eq} $10
+                and comment {eq} $11
+                and twitter_account {eq} $12
+                and web_page {eq} $13
+                and workspace {eq} $14
+            )
+        "),
+    )
+    .bind(id)
+    .bind(&workspace_image_url)
+    .bind(&background_url)
+    .bind(&avatar_url)
+    .bind(&user.account)
+    .bind(&user.name)
+    .bind(profile.is_premium)
+    .bind(parse_birth(&profile.birth))
+    .bind(region)
+    .bind(gender)
+    .bind(comment)
+    .bind(twitter_account)
+    .bind(web_page)
+    .bind(workspace)
+    .execute(&mut tx)
+    .await
+    .context(error::Database)?;
+
+    tx.commit().await.context(error::Database)?;
+
     if let Some(ref avatar_url) = avatar_url {
         download_other_images("avatar", avatar_url, kit).await?;
     }
@@ -284,59 +377,6 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
         download_other_images("workspace", workspace_image_url, kit).await?;
     }
 
-    let workspace_image_id = "(select id from pixiv_media where url = $2)";
-    let background_id = "(select id from pixiv_media where url = $3)";
-    let avatar_id = "(select id from pixiv_media where url = $4)";
-    let eq = NULL_EQ;
-    query(
-        &format!("
-        insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
-            gender, comment, twitter_account, web_page, workspace)
-        select 
-            $1,
-            {workspace_image_id},
-            {background_id},
-            {avatar_id},
-            now(),
-            $5,
-            $6::varchar,
-            $7::varchar,
-            $8,
-            $9::varchar,
-            $10::varchar,
-            $11
-        where not exists (
-            select id from pixiv_user_history where
-            item_id = $1
-            and workspace_image_id {eq} {workspace_image_id}
-            and background_id {eq} {background_id}
-            and avatar_id {eq} {avatar_id}
-            and birth {eq} $5
-            and region {eq} $6
-            and gender {eq} $7
-            and comment {eq} $8
-            and twitter_account {eq} $9
-            and web_page {eq} $10
-            and workspace {eq} $11
-            )
-        "),
-    )
-    .bind(id)
-    .bind(workspace_image_url)
-    .bind(background_url)
-    .bind(avatar_url)
-    .bind(parse_birth(&profile.birth))
-    .bind(profile.region)
-    .bind(profile.gender)
-    .bind(user.comment)
-    .bind(profile.twitter_account)
-    .bind(profile.webpage)
-    .bind(serde_json::to_value(&workspace).unwrap_or_default())
-    .execute(&mut tx)
-    .await
-    .context(error::Database)?;
-
-    tx.commit().await.context(error::Database)?;
     Ok(())
 }
 
@@ -465,16 +505,7 @@ pub async fn save_illusts(
     on_user_need_update: impl FnMut(&str),
     mut on_ugoira_metadata: impl FnMut(&str, (&str, &[i32])),
 ) -> crate::Result<()> {
-    update_tags(illusts.iter().flat_map(|x| &x.tags), &kit.db).await?;
-    update_users(
-        illusts
-            .iter()
-            .filter_map(|x| Some(&x.user).filter(|u| u.id != 0)),
-        &kit.db,
-        Duration::days(7), // TODO: use env var
-        on_user_need_update,
-    )
-    .await?;
+    preprocess_items!(illusts, &kit.db, on_user_need_update);
 
     for i in illusts {
         let id = i.id.to_string();
@@ -619,16 +650,7 @@ pub async fn save_novels(
     mut on_each_should_continue: impl FnMut() -> bool,
     on_user_need_update: impl FnMut(&str),
 ) -> crate::Result<()> {
-    update_tags(novels.iter().flat_map(|x| &x.tags), &kit.db).await?;
-    update_users(
-        novels
-            .iter()
-            .filter_map(|x| Some(&x.user).filter(|u| u.id != 0)),
-        &kit.db,
-        Duration::days(7), // TODO: use env var
-        on_user_need_update,
-    )
-    .await?;
+    preprocess_items!(novels, &kit.db, on_user_need_update);
 
     for n in novels {
         let id = n.id.to_string();

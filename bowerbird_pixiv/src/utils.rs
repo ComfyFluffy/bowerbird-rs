@@ -124,5 +124,9 @@ pub fn filename_from_url(url: &str) -> crate::Result<String> {
 }
 
 pub fn parse_birth(birth: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(birth, "%Y-%m-%d").ok()
+    if birth.is_empty() {
+        None
+    } else {
+        NaiveDate::parse_from_str(birth, "%Y-%m-%d").ok()
+    }
 }
