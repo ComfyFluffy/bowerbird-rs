@@ -69,8 +69,9 @@ pub struct PixivConfig {
     pub refresh_token: String,
     pub language: String,
 
-    pub user_update_interval_threshold: usize,
-    pub user_update_interval: Duration,
+    pub user_need_update_interval: Duration,
+    pub user_update_sleep_threshold: usize,
+    pub user_update_sleep_interval: Duration,
 }
 
 impl Default for PixivConfig {
@@ -81,8 +82,9 @@ impl Default for PixivConfig {
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
             language: "en".to_string(),
-            user_update_interval_threshold: 100,
-            user_update_interval: Duration::from_secs(1),
+            user_need_update_interval: chrono::Duration::days(1).to_std().unwrap(),
+            user_update_sleep_threshold: 100,
+            user_update_sleep_interval: Duration::from_secs(1),
         }
     }
 }

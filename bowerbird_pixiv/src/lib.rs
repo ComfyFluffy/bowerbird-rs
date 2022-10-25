@@ -13,6 +13,7 @@ use std::{
 pub mod database;
 pub mod download;
 mod error;
+mod queries;
 mod utils;
 
 pub use error::Error;
