@@ -18,7 +18,7 @@ async fn get_db() -> anyhow::Result<(Database, Pool<Postgres>)> {
         mongodb::options::ClientOptions::parse(var("MONGODB_URL")?).await?,
     )?
     .database("bowerbird_rust");
-    let pg = sqlx::PgPool::connect(&var("DATABASE_URL")?).await?;
+    let pg = sqlx::PgPool::connect(&var("TARGET_DATABASE_URL")?).await?;
     Ok((mongo, pg))
 }
 
@@ -70,9 +70,9 @@ async fn users(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
         ).fetch_one(&mut tr).await?.id;
 
         let mut query_builder = QueryBuilder::new(
-                "insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
-                    gender, comment, twitter_account, web_page, workspace, name, account, is_premium)",
-            );
+            "insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, birth, region,
+                gender, comment, twitter_account, web_page, workspace, name, account, is_premium)",
+        );
         query_builder.push_values(&user.history, |mut b, h| {
             let ext = h.extension.as_ref();
             let select_id = "(SELECT id FROM pixiv_media where url = ";
