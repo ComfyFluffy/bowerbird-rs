@@ -1,5 +1,6 @@
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationSeconds};
 use snafu::{ResultExt, Snafu};
 use std::{
     fs::{File, OpenOptions},
@@ -60,6 +61,7 @@ impl Default for Config {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PixivConfig {
@@ -69,8 +71,10 @@ pub struct PixivConfig {
     pub refresh_token: String,
     pub language: String,
 
+    #[serde_as(as = "DurationSeconds<u64>")]
     pub user_need_update_interval: Duration,
     pub user_update_sleep_threshold: usize,
+    #[serde_as(as = "DurationSeconds<u64>")]
     pub user_update_sleep_interval: Duration,
 }
 
@@ -82,7 +86,7 @@ impl Default for PixivConfig {
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
             language: "en".to_string(),
-            user_need_update_interval: chrono::Duration::days(1).to_std().unwrap(),
+            user_need_update_interval: chrono::Duration::days(7).to_std().unwrap(),
             user_update_sleep_threshold: 100,
             user_update_sleep_interval: Duration::from_secs(1),
         }

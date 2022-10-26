@@ -23,6 +23,7 @@ snafu = { version = "0.7" }
 dirs = "4"
 reqwest = { version = "0.11", features = ["socks"] }
 chrono = { version = "0.4", features = ["serde"] }
+serde_with = {version = "2", features = ["chrono_0_4", "time_0_3"]}
 
 [dev-dependencies]
 tempfile = "3.3.0"

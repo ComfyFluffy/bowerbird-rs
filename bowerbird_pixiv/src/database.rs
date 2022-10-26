@@ -1,5 +1,5 @@
 use bowerbird_utils::{try_skip, ImageMetadata};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use log::{debug, info, warn};
 use path_slash::PathBufExt;
 use snafu::ResultExt;
@@ -8,6 +8,7 @@ use std::{
     collections::{BTreeSet, HashSet},
     convert::TryInto,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crate::queries::*;
@@ -16,7 +17,7 @@ use crate::{download::download_other_images, error};
 use super::PixivKit;
 
 macro_rules! preprocess_items {
-    ($items:expr, $db:expr, $on_user_need_update:expr) => {
+    ($items:expr, $db:expr, $out_of_date_duration:expr, $on_user_need_update:expr) => {
         update_tags($items.iter().flat_map(|x| &x.tags), $db).await?;
         update_users(
             $items
@@ -25,7 +26,7 @@ macro_rules! preprocess_items {
                 .collect::<HashSet<_>>()
                 .into_iter(),
             $db,
-            Duration::seconds(60), // TODO: use env var
+            $out_of_date_duration,
             $on_user_need_update,
         )
         .await?;
@@ -39,6 +40,9 @@ async fn update_users(
     mut on_need_update: impl FnMut(&str),
 ) -> crate::Result<()> {
     let mut tx = db.begin().await.context(error::Database)?;
+    #[allow(clippy::or_fun_call)] // The call is actually inlined as a constant
+    let out_of_date_duration =
+        chrono::Duration::from_std(out_of_date_duration).unwrap_or(chrono::Duration::max_value());
     for user in users {
         let user_id = user.id.to_string();
 
@@ -244,7 +248,12 @@ pub async fn save_illusts(
     on_user_need_update: impl FnMut(&str),
     mut on_ugoira_metadata: impl FnMut(&str, (&str, &[i32])),
 ) -> crate::Result<()> {
-    preprocess_items!(illusts, &kit.db, on_user_need_update);
+    preprocess_items!(
+        illusts,
+        &kit.db,
+        kit.config.pixiv.user_need_update_interval,
+        on_user_need_update
+    );
 
     for i in illusts {
         let id = i.id.to_string();
@@ -307,7 +316,12 @@ pub async fn save_novels(
     mut on_each_should_continue: impl FnMut() -> bool,
     on_user_need_update: impl FnMut(&str),
 ) -> crate::Result<()> {
-    preprocess_items!(novels, &kit.db, on_user_need_update);
+    preprocess_items!(
+        novels,
+        &kit.db,
+        kit.config.pixiv.user_need_update_interval,
+        on_user_need_update
+    );
 
     for n in novels {
         let id = n.id.to_string();
