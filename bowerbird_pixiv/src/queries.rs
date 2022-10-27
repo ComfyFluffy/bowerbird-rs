@@ -193,7 +193,7 @@ pub mod user {
         let avatar_id = "(select id from pixiv_media where url = $4)";
         query(
         &format!("
-            insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, inserted_at, account,
+            insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, account,
                 name, is_premium, birth, region, gender, comment, twitter_account, web_page,
                 workspace)
             select 
@@ -201,7 +201,6 @@ pub mod user {
                 {workspace_image_id},
                 {background_id},
                 {avatar_id},
-                now(),
                 $5::varchar,
                 $6::varchar,
                 $7,
