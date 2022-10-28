@@ -16,15 +16,8 @@ use super::Task;
 
 pub struct Aria2Downloader {
     client: Client,
-    child: Child,
+    _child: Child,
     waitgroup: WaitGroup,
-}
-
-impl Drop for Aria2Downloader {
-    fn drop(&mut self) {
-        let r = self.child.start_kill();
-        debug!("tried to kill aria2: {:?}", r);
-    }
 }
 
 impl Aria2Downloader {
@@ -38,6 +31,7 @@ impl Aria2Downloader {
             .build()
         })?;
         let mut child = Command::new(aria2_path)
+            .kill_on_drop(true)
             .args([
                 "--no-conf",
                 "--auto-file-renaming=false",
@@ -60,7 +54,7 @@ impl Aria2Downloader {
             .context(error::Aria2)?;
         Ok(Self {
             client,
-            child,
+            _child: child,
             waitgroup: WaitGroup::new(),
         })
     }
@@ -97,11 +91,5 @@ impl Aria2Downloader {
 
     pub async fn wait(&self) {
         self.waitgroup.clone().await;
-    }
-
-    pub async fn shutdown(self) {
-        let r = self.client.force_shutdown().await;
-        debug!("tried to force shutdown aria2: {:?}", r);
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
