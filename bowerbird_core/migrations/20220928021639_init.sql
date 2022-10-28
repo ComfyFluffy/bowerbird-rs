@@ -13,6 +13,8 @@ create table pixiv_media
 );
 create unique index pixiv_media_url_uindex
     on pixiv_media (url);
+create unique index pixiv_media_local_path_uindex
+    on pixiv_media (local_path);
 
 create table pixiv_media_color
 (

@@ -15,12 +15,15 @@ use std::{
 };
 use tokio::{fs::metadata, task::spawn_blocking};
 
-use crate::{database::save_image, error, queries::media, utils::IllustUrl, Result};
-
-use super::{
-    utils::{self, filename_from_url},
-    PixivKit,
+use crate::{
+    database::save_image,
+    error,
+    queries::media,
+    utils::{filename_from_url, ugoira_to_mp4, IllustUrl},
+    Result,
 };
+
+use super::PixivKit;
 
 async fn file_exists(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
@@ -44,7 +47,7 @@ async fn on_success_ugoira(
     let with_mp4 = ffmpeg_path.is_some();
     if let Some(ffmpeg_path) = ffmpeg_path {
         let zip_path = path.clone();
-        spawn_blocking(move || utils::ugoira_to_mp4(&ffmpeg_path, &zip_path, ugoira_frame_delay))
+        spawn_blocking(move || ugoira_to_mp4(&ffmpeg_path, &zip_path, ugoira_frame_delay))
             .await
             .unwrap()?;
     }
@@ -97,10 +100,22 @@ async fn on_success_image(
     Ok(())
 }
 
-pub async fn download_image(parent_dir: &str, url: &str, kit: &PixivKit) -> Result<()> {
-    let filename = filename_from_url(url)?;
+pub async fn download_other_image(parent_dir: &str, url: &str, kit: &PixivKit) -> Result<()> {
+    let path_db = {
+        match IllustUrl::new(url) {
+            Ok(parsed_url) => {
+                let date = parsed_url.date_without_slash();
+                let filename = parsed_url.filename_without_ext;
+                let ext = parsed_url.ext;
+                format!("{parent_dir}/{filename}_{date}.{ext}")
+            }
+            Err(_) => {
+                let filename = filename_from_url(url)?;
+                format!("{parent_dir}/{filename}")
+            }
+        }
+    };
 
-    let path_db = format!("{parent_dir}/{filename}");
     let path = kit.task_config.parent_dir.join(&path_db);
 
     let on_success_hook = on_success_image(
@@ -144,15 +159,15 @@ async fn download_illust(
     })?;
 
     let parsed_url = IllustUrl::new(&url)?;
-    let date = parsed_url.date.replace('/', "");
+    let date = parsed_url.date_without_slash();
 
     let path_db = if is_multi_page {
         let filename = parsed_url.filename;
         format!("{user_id}/{illust_id}_{date}/{filename}")
     } else {
-        let id_page = parsed_url.filename_without_ext;
+        let filename = parsed_url.filename_without_ext;
         let ext = parsed_url.ext;
-        format!("{user_id}/{id_page}_{date}.{ext}")
+        format!("{user_id}/{filename}_{date}.{ext}")
     };
 
     let path = kit.task_config.parent_dir.join(&path_db);

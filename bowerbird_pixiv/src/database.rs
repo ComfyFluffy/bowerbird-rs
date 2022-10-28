@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{download::download_image, error};
+use crate::{download::download_other_image, error};
 use crate::{queries::*, Result};
 
 use super::PixivKit;
@@ -175,13 +175,13 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> Result<()> {
     tx.commit().await.context(error::Database)?;
 
     if let Some(avatar_url) = avatar_url {
-        download_image("avatar", avatar_url, kit).await?;
+        download_other_image("avatar", avatar_url, kit).await?;
     }
     if let Some(background_url) = background_url {
-        download_image("background", background_url, kit).await?;
+        download_other_image("background", background_url, kit).await?;
     }
     if let Some(workspace_image_url) = workspace_image_url {
-        download_image("workspace", workspace_image_url, kit).await?;
+        download_other_image("workspace", workspace_image_url, kit).await?;
     }
 
     Ok(())

@@ -62,6 +62,11 @@ impl<'a> IllustUrl<'a> {
             ext: captures.get(4).unwrap().as_str(),
         })
     }
+
+    // Return the date without slashes.
+    pub fn date_without_slash(&self) -> String {
+        self.date.replace('/', "")
+    }
 }
 
 pub fn ugoira_to_mp4(
