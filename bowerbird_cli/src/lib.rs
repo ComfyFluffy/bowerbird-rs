@@ -125,12 +125,12 @@ async fn run_internal() -> anyhow::Result<()> {
                         let (kit, target_user_id) = pre_fn.await?;
                         bowerbird_pixiv::illust_bookmarks(&target_user_id, c.private, limit, &kit)
                             .await?;
-                        kit.downloader.wait_shutdown().await;
+                        kit.wait_tasks().await;
                     }
                     SubcommandPixivAction::Uploads => {
                         let (kit, target_user_id) = pre_fn.await?;
                         bowerbird_pixiv::illust_uploads(&target_user_id, limit, &kit).await?;
-                        kit.downloader.wait_shutdown().await;
+                        kit.wait_tasks().await;
                     }
                 },
                 SubcommandPixiv::Novel(c) => {

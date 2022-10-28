@@ -11,8 +11,8 @@ use std::{
     time::Duration,
 };
 
-use crate::queries::*;
-use crate::{download::download_other_images, error};
+use crate::{download::download_image, error};
+use crate::{queries::*, Result};
 
 use super::PixivKit;
 
@@ -38,7 +38,7 @@ async fn update_users(
     db: &PgPool,
     out_of_date_duration: Duration,
     mut on_need_update: impl FnMut(&str),
-) -> crate::Result<()> {
+) -> Result<()> {
     let mut tx = db.begin().await.context(error::Database)?;
     #[allow(clippy::or_fun_call)] // The call is actually inlined as a constant
     let out_of_date_duration =
@@ -76,7 +76,7 @@ async fn update_tags(
     tags: impl Iterator<Item = &pixivcrab::models::Tag>,
     db: &PgPool,
     // mut on_id_returned: Option<impl FnMut(&Vec<String>, i32)>,
-) -> crate::Result<()> {
+) -> Result<()> {
     let tags: HashSet<Vec<String>> = flatten_tags_and_insert(tags)
         .into_iter()
         .map(|x| x.into_iter().map(|x| x.to_string()).collect())
@@ -108,7 +108,7 @@ async fn update_tags(
 pub async fn update_user_id_set(
     users_need_update_set: BTreeSet<String>,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let need_sleep = users_need_update_set.len() > kit.config.pixiv.user_update_sleep_threshold;
     // Sleep for 500ms to avoid 403 error
     for user_id in users_need_update_set {
@@ -120,7 +120,7 @@ pub async fn update_user_id_set(
     Ok(())
 }
 
-async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> {
+async fn update_user_detail(user_id: &str, kit: &PixivKit) -> Result<()> {
     info!("updating pixiv user data: {}", user_id);
     let resp = kit
         .api
@@ -175,13 +175,13 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> crate::Result<()> 
     tx.commit().await.context(error::Database)?;
 
     if let Some(avatar_url) = avatar_url {
-        download_other_images("avatar", avatar_url, kit).await?;
+        download_image("avatar", avatar_url, kit).await?;
     }
     if let Some(background_url) = background_url {
-        download_other_images("background", background_url, kit).await?;
+        download_image("background", background_url, kit).await?;
     }
     if let Some(workspace_image_url) = workspace_image_url {
-        download_other_images("workspace", workspace_image_url, kit).await?;
+        download_image("workspace", workspace_image_url, kit).await?;
     }
 
     Ok(())
@@ -194,7 +194,7 @@ pub async fn save_image(
     url: String,
     path: impl AsRef<Path>,
     path_db: String,
-) -> crate::Result<()> {
+) -> Result<()> {
     let mime = mime_guess::from_path(path).first().map(|x| x.to_string());
     let mut tx = db.begin().await.context(error::Database)?;
 
@@ -247,7 +247,7 @@ pub async fn save_illusts(
     kit: &PixivKit,
     on_user_need_update: impl FnMut(&str),
     mut on_ugoira_metadata: impl FnMut(&str, (&str, &[i32])),
-) -> crate::Result<()> {
+) -> Result<()> {
     preprocess_items!(
         illusts,
         &kit.db,
@@ -315,7 +315,7 @@ pub async fn save_novels(
     kit: &PixivKit,
     mut on_each_should_continue: impl FnMut() -> bool,
     on_user_need_update: impl FnMut(&str),
-) -> crate::Result<()> {
+) -> Result<()> {
     preprocess_items!(
         novels,
         &kit.db,

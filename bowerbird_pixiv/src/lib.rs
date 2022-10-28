@@ -8,7 +8,9 @@ use sqlx::PgPool;
 use std::{
     collections::{BTreeSet, HashMap},
     path::PathBuf,
+    sync::Arc,
 };
+use tokio::sync::Semaphore;
 
 pub mod database;
 pub mod download;
@@ -45,11 +47,13 @@ pub struct PixivKit {
     pub task_config: TaskConfig,
     pub config: Config,
     pub auth_result: pixivcrab::AuthResult,
+    tasks_semaphore: Arc<Semaphore>,
+    tasks_initial_permits: usize,
 }
 
 impl PixivKit {
     /// Log in to pixiv, save token, start aria2, and check ffmpeg.
-    pub async fn new(mut config: Config, db: PgPool) -> crate::Result<Self> {
+    pub async fn new(mut config: Config, db: PgPool) -> Result<Self> {
         let mut api_client = ClientBuilder::new().cookie_store(true);
         if config.ssl_key_log {
             api_client = logged_rustls_with_native_root(api_client).context(error::Utils)?;
@@ -86,7 +90,10 @@ impl PixivKit {
             parent_dir: config.sub_dir(&config.pixiv.storage_dir),
             proxy: config.pxoxy_string(&config.pixiv.proxy_download),
         };
+        let tasks_initial_permits = num_cpus::get();
         Ok(Self {
+            tasks_initial_permits,
+            tasks_semaphore: Arc::new(Semaphore::new(tasks_initial_permits)),
             api,
             db,
             downloader,
@@ -98,6 +105,15 @@ impl PixivKit {
 
     pub fn current_user_id(&self) -> &str {
         &self.auth_result.user.id
+    }
+
+    pub async fn wait_tasks(&self) {
+        self.downloader.wait().await;
+        let _ = self
+            .tasks_semaphore
+            .acquire_many(self.tasks_initial_permits as u32)
+            .await
+            .unwrap();
     }
 }
 
@@ -115,7 +131,7 @@ async fn illusts(
     limit: Option<u32>,
     mut pager: pixivcrab::Pager<pixivcrab::models::illust::Response>,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let mut users_need_update_set = BTreeSet::new();
     let mut items_sent = 0;
     let mut ugoira_map: HashMap<String, (String, Vec<i32>)> = HashMap::new();
@@ -152,11 +168,7 @@ async fn illusts(
     Ok(())
 }
 
-pub async fn illust_uploads(
-    user_id: &str,
-    limit: Option<u32>,
-    kit: &PixivKit,
-) -> crate::Result<()> {
+pub async fn illust_uploads(user_id: &str, limit: Option<u32>, kit: &PixivKit) -> Result<()> {
     let pager = kit.api.illust_uploads(user_id);
     illusts(limit, pager, kit).await
 }
@@ -166,7 +178,7 @@ pub async fn illust_bookmarks(
     private: bool,
     limit: Option<u32>,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let pager = kit.api.illust_bookmarks(user_id, private);
     illusts(limit, pager, kit).await
 }
@@ -176,7 +188,7 @@ async fn novels(
     update_exists: bool,
     mut pager: pixivcrab::Pager<pixivcrab::models::novel::Response>,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let mut users_need_update_set = BTreeSet::new();
     let mut items_sent = 0;
 
@@ -212,7 +224,7 @@ pub async fn novel_bookmarks(
     limit: Option<u32>,
     update_exists: bool,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let pager = kit.api.novel_bookmarks(user_id, private);
     novels(limit, update_exists, pager, kit).await
 }
@@ -222,7 +234,7 @@ pub async fn novel_uploads(
     limit: Option<u32>,
     update_exists: bool,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let pager = kit.api.novel_uploads(user_id);
     novels(limit, update_exists, pager, kit).await
 }

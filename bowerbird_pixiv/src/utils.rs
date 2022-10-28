@@ -1,8 +1,10 @@
 use anyhow::anyhow;
 use chrono::NaiveDate;
 use futures::TryStreamExt;
+use lazy_static::lazy_static;
 use log::warn;
 use pixivcrab::Pager;
+use regex::Regex;
 use serde::de::DeserializeOwned;
 use snafu::ResultExt;
 use std::{
@@ -14,7 +16,53 @@ use std::{
 };
 use url::Url;
 
-use crate::error;
+use crate::{error, Result};
+
+lazy_static! {
+    static ref RE_ILLUST_URL: Regex =
+        Regex::new(r"/(\d{4}/\d{2}/\d{2}/\d{2}/\d{2}/\d{2})/((.*)\.(.*))$").unwrap();
+}
+
+/// Parse the pximg URL.
+///
+/// # Example
+///
+/// Parsing the URL
+/// `https://i.pximg.net/img-original/img/2021/08/22/22/03/33/92187206_p0.jpg`
+///
+/// Results:
+///
+/// `date`: `2021/08/22/22/03/33`
+///
+/// `filename`: `92187206_p0.jpg`
+///
+/// `filename_without_ext`: `92187206_p0`
+///
+/// `ext`: `jpg`
+pub struct IllustUrl<'a> {
+    pub date: &'a str,
+    pub filename: &'a str,
+    pub filename_without_ext: &'a str,
+    pub ext: &'a str,
+}
+
+impl<'a> IllustUrl<'a> {
+    pub fn new(url: &'a str) -> Result<Self> {
+        let captures = RE_ILLUST_URL.captures(url).ok_or_else(|| {
+            error::UnknownData {
+                message: format!("cannot parse illust url: {url}"),
+            }
+            .build()
+        })?;
+
+        Ok(Self {
+            date: captures.get(1).unwrap().as_str(),
+            filename: captures.get(2).unwrap().as_str(),
+            filename_without_ext: captures.get(3).unwrap().as_str(),
+            ext: captures.get(4).unwrap().as_str(),
+        })
+    }
+}
 
 pub fn ugoira_to_mp4(
     ffmpeg_path: impl AsRef<Path>,
@@ -80,7 +128,7 @@ pub fn ugoira_to_mp4(
     Ok(mp4_path)
 }
 
-pub async fn retry_pager<T>(pager: &mut Pager<T>, max_tries: i32) -> crate::Result<Option<T>>
+pub async fn retry_pager<T>(pager: &mut Pager<T>, max_tries: i32) -> Result<Option<T>>
 where
     T: DeserializeOwned + pixivcrab::NextUrl + Debug + Send,
 {
@@ -109,12 +157,11 @@ where
     }
 }
 
-fn filename_from_url_ok(url: &str) -> Option<String> {
-    Some(Url::parse(url).ok()?.path_segments()?.last()?.to_string())
-}
-
-pub fn filename_from_url(url: &str) -> crate::Result<String> {
-    match filename_from_url_ok(url) {
+pub fn filename_from_url(url: &str) -> Result<String> {
+    let filename = (|| -> Option<String> {
+        Some(Url::parse(url).ok()?.path_segments()?.last()?.to_string())
+    })();
+    match filename {
         Some(filename) => Ok(filename),
         None => Err(error::UnknownData {
             message: format!("cannot parse filename from url: {}", url),

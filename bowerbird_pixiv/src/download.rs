@@ -1,13 +1,11 @@
 use aria2_ws::TaskOptions;
 use bowerbird_utils::{
-    downloader::{Task, TaskHooks},
+    downloader::{BoxFutureResult, Task, TaskHooks},
     get_image_metadata, try_skip,
 };
 use futures::FutureExt;
-use lazy_static::lazy_static;
 use log::warn;
 
-use regex::{Captures, Regex};
 use snafu::ResultExt;
 use sqlx::PgPool;
 use std::{
@@ -15,53 +13,22 @@ use std::{
     convert::TryInto,
     path::{Path, PathBuf},
 };
-use tokio::task::spawn_blocking;
+use tokio::{fs::metadata, spawn, task::spawn_blocking};
 
-use crate::{database::save_image, error};
+use crate::{database::save_image, error, utils::IllustUrl, Result};
 
 use super::{
     utils::{self, filename_from_url},
     PixivKit,
 };
 
-lazy_static! {
-    /// Match the pximg URL.
-    ///
-    /// # Example
-    ///
-    /// Matching the URL
-    /// `https://i.pximg.net/img-original/img/2021/08/22/22/03/33/92187206_p0.jpg`
-    ///
-    /// Groups:
-    ///
-    /// __0__ `/2021/08/22/22/03/33/92187206_p0.jpg`
-    ///
-    /// __1__ `2021/08/22/22/03/33`
-    ///
-    /// __2__ `92187206_p0.jpg`
-    ///
-    /// __3__ `92187206_p0`
-    ///
-    /// __4__ `jpg`
-    static ref RE_ILLUST_URL: Regex =
-        Regex::new(r"/(\d{4}/\d{2}/\d{2}/\d{2}/\d{2}/\d{2})/((.*)\.(.*))$").unwrap();
-}
-
-fn get_captures(url: &str) -> crate::Result<Captures> {
-    RE_ILLUST_URL.captures(url).ok_or_else(|| {
-        error::UnknownData {
-            message: format!("cannot match url with regex: {url}"),
-        }
-        .build()
-    })
-}
-
-fn file_exists(path: impl AsRef<Path>) -> bool {
+async fn file_exists(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
-    if path.exists() {
+    if metadata(path).await.is_ok() {
         let mut aria2_path = path.as_os_str().to_os_string();
         aria2_path.push(".aria2");
-        return !PathBuf::from(aria2_path).exists();
+        let aria2_non_exists = metadata(PathBuf::from(aria2_path)).await.is_err();
+        return aria2_non_exists;
     }
     false
 }
@@ -96,7 +63,7 @@ async fn on_success_ugoira(
     Ok(())
 }
 
-async fn on_success_illust(
+async fn on_success_image(
     db: PgPool,
     url: String,
     path: impl AsRef<Path>,
@@ -130,42 +97,51 @@ async fn on_success_illust(
     Ok(())
 }
 
-pub async fn download_other_images(
-    parent_dir: &str,
-    url: &str,
-    kit: &PixivKit,
-) -> crate::Result<()> {
+fn spawn_on_illust_exists(kit: &PixivKit, url: String, path: PathBuf, path_db: String) {
+    let db = kit.db.clone();
+    let sem = kit.tasks_semaphore.clone();
+    let fut = async move {
+        let _permit = sem.acquire().await.unwrap();
+        let result: anyhow::Result<()> = async move {
+            if crate::queries::media::local_path_exists(&path_db, &db).await? {
+                return Ok(());
+            };
+
+            on_success_image(db, url, path, path_db).await?;
+
+            Ok(())
+        }
+        .await;
+        if let Err(e) = result {
+            warn!("exist illust processing error: {}", e);
+        }
+    };
+    spawn(fut);
+}
+
+pub async fn download_image(parent_dir: &str, url: &str, kit: &PixivKit) -> Result<()> {
     let filename = filename_from_url(url)?;
 
     let path_db = format!("{parent_dir}/{filename}");
     let path = kit.task_config.parent_dir.join(&path_db);
 
-    if file_exists(&path) {
+    if file_exists(&path).await {
+        spawn_on_illust_exists(kit, url.to_string(), path, path_db);
         return Ok(());
     }
 
-    let task = Task {
-        hooks: Some(TaskHooks {
-            on_success: Some(
-                on_success_illust(
-                    kit.db.clone(),
-                    url.to_string(),
-                    path.clone(),
-                    path_db.clone(),
-                )
-                .boxed(),
-            ),
-            ..Default::default()
-        }),
-        options: Some(TaskOptions {
-            header: Some(vec!["Referer: https://app-api.pixiv.net/".to_string()]),
-            all_proxy: kit.task_config.proxy.clone(),
-            out: Some(path_db),
-            dir: Some(kit.task_config.parent_dir.to_string_lossy().to_string()),
-            ..Default::default()
-        }),
-        url: url.to_string(),
-    };
+    let task = build_task(
+        on_success_image(
+            kit.db.clone(),
+            url.to_string(),
+            path.clone(),
+            path_db.clone(),
+        )
+        .boxed(),
+        kit,
+        path_db,
+        url.to_string(),
+    );
     kit.downloader.add_task(task).await.context(error::Utils)
 }
 
@@ -176,7 +152,7 @@ async fn download_illust(
     is_multi_page: bool,
     ugoira_frame_delay: Option<Vec<i32>>,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     let url = url.ok_or_else(|| {
         error::UnknownData {
             message: format!("empty url for {}", illust_id),
@@ -184,21 +160,24 @@ async fn download_illust(
         .build()
     })?;
 
-    let captures = get_captures(&url)?;
-    let date = captures.get(1).unwrap().as_str().replace('/', "");
+    let parsed_url = IllustUrl::new(&url)?;
+    let date = parsed_url.date.replace('/', "");
 
     let path_db = if is_multi_page {
-        let filename = captures.get(2).unwrap().as_str();
+        let filename = parsed_url.filename;
         format!("{user_id}/{illust_id}_{date}/{filename}")
     } else {
-        let id_page = captures.get(3).unwrap().as_str();
-        let ext = captures.get(4).unwrap().as_str();
+        let id_page = parsed_url.filename_without_ext;
+        let ext = parsed_url.ext;
         format!("{user_id}/{id_page}_{date}.{ext}")
     };
 
     let path = kit.task_config.parent_dir.join(&path_db);
 
-    if file_exists(&path) {
+    if file_exists(&path).await {
+        if ugoira_frame_delay.is_none() {
+            spawn_on_illust_exists(kit, url.to_string(), path, path_db);
+        }
         return Ok(());
     }
 
@@ -214,9 +193,19 @@ async fn download_illust(
         )
         .boxed()
     } else {
-        on_success_illust(kit.db.clone(), url.clone(), path, path_db.clone()).boxed()
+        on_success_image(kit.db.clone(), url.clone(), path, path_db.clone()).boxed()
     };
 
+    let task = build_task(on_success_hook, kit, path_db, url);
+    kit.downloader.add_task(task).await.context(error::Utils)
+}
+
+fn build_task(
+    on_success_hook: BoxFutureResult,
+    kit: &PixivKit,
+    path_db: String,
+    url: String,
+) -> Task {
     let task = Task {
         hooks: Some(TaskHooks {
             on_success: Some(on_success_hook),
@@ -231,7 +220,7 @@ async fn download_illust(
         }),
         url,
     };
-    kit.downloader.add_task(task).await.context(error::Utils)
+    task
 }
 
 pub async fn download_illusts(
@@ -239,7 +228,7 @@ pub async fn download_illusts(
     ugoira_map: &mut HashMap<String, (String, Vec<i32>)>,
     mut on_each_should_continue: impl FnMut() -> bool,
     kit: &PixivKit,
-) -> crate::Result<()> {
+) -> Result<()> {
     for i in illusts {
         if !on_each_should_continue() {
             break;

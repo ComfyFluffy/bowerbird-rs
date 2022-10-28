@@ -43,7 +43,7 @@ pub async fn set_source_inaccessible(
     table_name: &str,
     source_id: &str,
     e: impl PgExecutor<'_>,
-) -> crate::Result<()> {
+) -> Result<()> {
     query(&format!(
         "
         UPDATE {table_name}
@@ -169,7 +169,7 @@ pub mod user {
     ) -> Result<()> {
         macro_rules! filter_empty {
             ($x:expr) => {
-                $x.as_ref().map(|x| x.as_str()).filter(|x| !x.is_empty())
+                $x.as_deref().filter(|x| !x.is_empty())
             };
         }
 
@@ -407,6 +407,19 @@ pub mod media {
         .await
         .context(error::Database)?;
         Ok(())
+    }
+
+    pub async fn local_path_exists(local_path: &str, e: impl PgExecutor<'_>) -> Result<bool> {
+        let r = query!(
+            "
+            select id from pixiv_media where local_path = $1 limit 1
+            ",
+            local_path
+        )
+        .fetch_optional(e)
+        .await
+        .context(error::Database)?;
+        Ok(r.is_some())
     }
 }
 

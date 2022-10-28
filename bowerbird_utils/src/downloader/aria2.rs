@@ -8,7 +8,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{error, get_available_port, WaitGroup};
+use crate::{error, get_available_port, Result, WaitGroup};
 
 pub use reqwest::header::HeaderMap;
 
@@ -28,7 +28,7 @@ impl Drop for Aria2Downloader {
 }
 
 impl Aria2Downloader {
-    pub async fn new(aria2_path: &str) -> crate::Result<Self> {
+    pub async fn new(aria2_path: &str) -> Result<Self> {
         let token = "bowerbird";
         let ra = 30311..30400;
         let port = get_available_port(ra.clone()).ok_or_else(|| {
@@ -82,7 +82,7 @@ impl Aria2Downloader {
         }
     }
 
-    pub async fn add_task(&self, task: Task) -> crate::Result<()> {
+    pub async fn add_task(&self, task: Task) -> Result<()> {
         let hooks = task.hooks.map(|hooks| aria2_ws::TaskHooks {
             on_complete: Some(self.map_hook(hooks.on_success)),
             on_error: Some(self.map_hook(hooks.on_error)),
@@ -95,8 +95,11 @@ impl Aria2Downloader {
         Ok(())
     }
 
-    pub async fn wait_shutdown(self) {
+    pub async fn wait(&self) {
         self.waitgroup.clone().await;
+    }
+
+    pub async fn shutdown(self) {
         let r = self.client.force_shutdown().await;
         debug!("tried to force shutdown aria2: {:?}", r);
         tokio::time::sleep(Duration::from_millis(100)).await;
