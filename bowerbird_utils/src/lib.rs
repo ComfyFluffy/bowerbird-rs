@@ -1,5 +1,5 @@
-use ::log::{debug, warn};
 use image::GenericImageView;
+use log::{debug, error, warn};
 use reqwest::ClientBuilder;
 use snafu::ResultExt;
 use std::{
@@ -126,7 +126,9 @@ pub async fn check_ffmpeg(path: &str) -> Option<PathBuf> {
 
     let mut ffmpeg = Command::new(&ffmpeg_path);
     ffmpeg.args(["-hide_banner", "-loglevel", "error"]);
-    match ffmpeg.spawn() {
+    match ffmpeg.spawn().context(error::FFmpegNotFound {
+        path: ffmpeg_path.clone(),
+    }) {
         Ok(mut child) => {
             if timeout(Duration::from_secs(1), child.wait()).await.is_err() {
                 warn!("ffmpeg running for 1s, try to kill it");
@@ -135,11 +137,7 @@ pub async fn check_ffmpeg(path: &str) -> Option<PathBuf> {
             Some(ffmpeg_path)
         }
         Err(err) => {
-            warn!(
-                "ffmpeg not found, some functions will not work: {}: {}",
-                ffmpeg_path.to_string_lossy(),
-                err
-            );
+            warn!("{}", err);
             None
         }
     }

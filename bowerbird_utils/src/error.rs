@@ -1,5 +1,5 @@
 use snafu::Snafu;
-use std::process::ExitStatus;
+use std::{path::PathBuf, process::ExitStatus};
 
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub(crate)))]
@@ -31,4 +31,10 @@ pub enum Error {
 
     #[snafu(display("parsing system certifcates: {source}"))]
     RustlsParseCerts { source: webpki::Error },
+
+    #[snafu(display("ffmpeg (path: {path:?}) not found, some functions may not work: {source}"))]
+    FFmpegNotFound {
+        source: std::io::Error,
+        path: PathBuf,
+    },
 }
