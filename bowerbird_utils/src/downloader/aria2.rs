@@ -16,6 +16,7 @@ use super::Task;
 
 pub struct Aria2Downloader {
     client: Client,
+    /// Spawned aria2 process. Will be killed when dropped.
     _child: Child,
     waitgroup: WaitGroup,
 }

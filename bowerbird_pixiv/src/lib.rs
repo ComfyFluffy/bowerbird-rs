@@ -1,6 +1,7 @@
 use bowerbird_core::config::Config;
 use bowerbird_utils::{check_ffmpeg, downloader::Aria2Downloader, logged_rustls_with_native_root};
-use log::{debug, info};
+use futures::Future;
+use log::{debug, error, info};
 use pixivcrab::AppApi;
 use reqwest::ClientBuilder;
 use snafu::ResultExt;
@@ -10,7 +11,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::sync::Semaphore;
+use tokio::{spawn, sync::Semaphore};
 
 pub mod database;
 pub mod download;
@@ -114,6 +115,19 @@ impl PixivKit {
             .acquire_many(self.tasks_initial_permits as u32)
             .await
             .unwrap();
+    }
+
+    pub fn spawn_limited<F>(&self, f: F)
+    where
+        F: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let semaphore = self.tasks_semaphore.clone();
+        spawn(async move {
+            let _permit = semaphore.acquire().await.unwrap();
+            if let Err(e) = f.await {
+                error!("task error: {}", e);
+            }
+        });
     }
 }
 

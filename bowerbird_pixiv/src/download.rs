@@ -3,7 +3,7 @@ use bowerbird_utils::{
     downloader::{BoxFutureResult, Task, TaskHooks},
     get_image_metadata, try_skip,
 };
-use futures::FutureExt;
+use futures::{Future, FutureExt};
 use log::warn;
 
 use snafu::ResultExt;
@@ -13,9 +13,9 @@ use std::{
     convert::TryInto,
     path::{Path, PathBuf},
 };
-use tokio::{fs::metadata, spawn, task::spawn_blocking};
+use tokio::{fs::metadata, task::spawn_blocking};
 
-use crate::{database::save_image, error, utils::IllustUrl, Result};
+use crate::{database::save_image, error, queries::media, utils::IllustUrl, Result};
 
 use super::{
     utils::{self, filename_from_url},
@@ -97,52 +97,35 @@ async fn on_success_image(
     Ok(())
 }
 
-fn spawn_on_illust_exists(kit: &PixivKit, url: String, path: PathBuf, path_db: String) {
-    let db = kit.db.clone();
-    let sem = kit.tasks_semaphore.clone();
-    let fut = async move {
-        let _permit = sem.acquire().await.unwrap();
-        let result: anyhow::Result<()> = async move {
-            if crate::queries::media::local_path_exists(&path_db, &db).await? {
-                return Ok(());
-            };
-
-            on_success_image(db, url, path, path_db).await?;
-
-            Ok(())
-        }
-        .await;
-        if let Err(e) = result {
-            warn!("exist illust processing error: {}", e);
-        }
-    };
-    spawn(fut);
-}
-
 pub async fn download_image(parent_dir: &str, url: &str, kit: &PixivKit) -> Result<()> {
     let filename = filename_from_url(url)?;
 
     let path_db = format!("{parent_dir}/{filename}");
     let path = kit.task_config.parent_dir.join(&path_db);
 
+    let on_success_hook = on_success_image(
+        kit.db.clone(),
+        url.to_string(),
+        path.clone(),
+        path_db.clone(),
+    );
     if file_exists(&path).await {
-        spawn_on_illust_exists(kit, url.to_string(), path, path_db);
+        on_path_exists(&path_db, kit, on_success_hook).await?;
         return Ok(());
     }
-
-    let task = build_task(
-        on_success_image(
-            kit.db.clone(),
-            url.to_string(),
-            path.clone(),
-            path_db.clone(),
-        )
-        .boxed(),
-        kit,
-        path_db,
-        url.to_string(),
-    );
+    let task = build_task(on_success_hook.boxed(), kit, path_db, url.to_string());
     kit.downloader.add_task(task).await.context(error::Utils)
+}
+
+async fn on_path_exists(
+    path_db: &str,
+    kit: &PixivKit,
+    on_success_hook: impl Future<Output = anyhow::Result<()>> + Send + 'static,
+) -> Result<()> {
+    if !media::local_path_exists(path_db, &kit.db).await? {
+        kit.spawn_limited(on_success_hook);
+    };
+    Ok(())
 }
 
 async fn download_illust(
@@ -174,27 +157,24 @@ async fn download_illust(
 
     let path = kit.task_config.parent_dir.join(&path_db);
 
-    if file_exists(&path).await {
-        if ugoira_frame_delay.is_none() {
-            spawn_on_illust_exists(kit, url.to_string(), path, path_db);
-        }
-        return Ok(());
-    }
-
     let on_success_hook = if let Some(ugoira_frame_delay) = ugoira_frame_delay {
         // The task is an ugoira zip.
         on_success_ugoira(
             kit.db.clone(),
             url.clone(),
-            path,
+            path.clone(),
             path_db.clone(),
             ugoira_frame_delay,
             kit.task_config.ffmpeg_path.clone(),
         )
         .boxed()
     } else {
-        on_success_image(kit.db.clone(), url.clone(), path, path_db.clone()).boxed()
+        on_success_image(kit.db.clone(), url.clone(), path.clone(), path_db.clone()).boxed()
     };
+    if file_exists(&path).await {
+        on_path_exists(&path_db, kit, on_success_hook).await?;
+        return Ok(());
+    }
 
     let task = build_task(on_success_hook, kit, path_db, url);
     kit.downloader.add_task(task).await.context(error::Utils)
