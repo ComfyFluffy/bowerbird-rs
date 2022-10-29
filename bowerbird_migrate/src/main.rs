@@ -3,6 +3,7 @@ use bson::doc;
 use chrono::NaiveDate;
 use futures::TryStreamExt;
 use mongodb::Database;
+use regex::Regex;
 use sqlx::{query, Pool, Postgres};
 use std::{collections::BTreeMap, env::var, time::Instant};
 
@@ -30,13 +31,20 @@ async fn images(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
 
     for img in old {
         let ext = img.extension.as_ref();
-        let id: i32 = query!(
-            "INSERT INTO pixiv_media (url, size, mime, local_path, width, height, inserted_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
-            img.url, img.size as i32, img.mime, img.local_path, ext.map(|x| x.width as i32), ext.map(|x| x.height as i32), img._id.map(|o| o.timestamp().to_chrono())
-        ).fetch_one(&mut tr).await?.id;
-        if let Some(ext) = img.extension {
+
+        if img.local_path.starts_with("avatar")
+            || img.local_path.starts_with("background")
+            || img.local_path.starts_with("workspace")
+        {
+            continue;
+        }
+        let id: i64 = query!(
+                "INSERT INTO pixiv_media (url, size, mime, local_path, width, height, inserted_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                img.url, img.size as i32, img.mime, img.local_path, ext.map(|x| x.width as i32), ext.map(|x| x.height as i32), img._id.map(|o| o.timestamp().to_chrono())
+            ).fetch_one(&mut tr).await?.id;
+        if let Some(ref ext) = img.extension {
             let mut q = QueryBuilder::new("INSERT INTO pixiv_media_color (media_id, h, s, v) ");
-            q.push_values(ext.palette_hsv, |mut b, c| {
+            q.push_values(&ext.palette_hsv, |mut b, c| {
                 b.push_bind(id).push_bind(c.h).push_bind(c.s).push_bind(c.v);
             });
             q.build().execute(&mut tr).await?;
@@ -164,7 +172,7 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             vec![]
         };
 
-        let id: i32 = query!(
+        let id = query!(
             "INSERT INTO pixiv_illust (
             parent_id,
             source_id,
@@ -200,42 +208,55 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
         .await?
         .id;
 
-        if !illust.history.is_empty() {
-            let mut q = QueryBuilder::new(
-                "INSERT INTO pixiv_illust_history (
-                    item_id, 
-                    illust_type,
-                    caption_html,
-                    title,
-                    date,
-                    media_ids,
-                    ugoira_frame_duration,
-                    inserted_at
-                ) ",
-            );
-            q.push_values(&illust.history, |mut b, h| {
-                let ext = h.extension.as_ref();
-                b.push_bind(id)
-                    .push_bind(ext.map(|v| &v.illust_type))
-                    .push_bind(ext.map(|v| &v.caption_html))
-                    .push_bind(ext.map(|v| &v.title))
-                    .push_bind(ext.map(|v| v.date.as_ref().map(|t| t.to_chrono())))
-                    .push(
-                        "
-                    (select array_agg(id order by i)
-                     from pixiv_media
-                        join unnest(",
-                    )
-                    .push_bind_unseparated(ext.map(|v| &v.image_urls))
-                    .push_unseparated(
-                        ")
-                        with ordinality urls(url, i) using (url))",
-                    )
-                    .push_bind(ext.map(|v| &v.ugoira_delay))
-                    .push_bind(h.last_modified.map(|dt| dt.to_chrono()));
-            });
-            // println!("{}", q.sql());
-            q.build().execute(&mut tr).await?;
+        for h in &illust.history {
+            let ext = h.extension.as_ref();
+            let history_id = query!(
+                "
+                    INSERT INTO pixiv_illust_history (
+                        item_id, 
+                        illust_type,
+                        caption_html,
+                        title,
+                        date,
+                        ugoira_frame_duration,
+                        inserted_at
+                    ) VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6,
+                        $7
+                    ) RETURNING id
+                    ",
+                id,
+                ext.map(|v| &v.illust_type),
+                ext.map(|v| &v.caption_html),
+                ext.map(|v| &v.title),
+                ext.and_then(|v| v.date).map(|t| t.to_chrono()),
+                ext.and_then(|v| v.ugoira_delay.as_ref())
+                    .map(|v| v.as_slice()),
+                h.last_modified.map(|dt| dt.to_chrono()),
+            )
+            .fetch_one(&mut tr)
+            .await?
+            .id;
+
+            if let Some(ext) = ext {
+                query!(
+                    "
+                    insert into pixiv_illust_history_media (history_id, media_id)
+                    select $1, id
+                    from pixiv_media
+                        join unnest($2::varchar[]) url using (url)
+                    ",
+                    history_id,
+                    &ext.image_urls
+                )
+                .execute(&mut tr)
+                .await?;
+            }
         }
     }
 
@@ -279,7 +300,7 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
             vec![]
         };
 
-        let id: i32 = query!(
+        let id = query!(
             "INSERT INTO pixiv_novel (
             parent_id,
             source_id,
@@ -343,6 +364,36 @@ async fn novel(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
     tr.commit().await?;
     Ok(())
 }
+
+async fn test_image_order(pg: &Pool<Postgres>) -> anyhow::Result<()> {
+    let re = Regex::new(r"p(\d+)").unwrap();
+    let r = query!(
+        "
+        select id, image_paths from pixiv_illust_latest
+        "
+    )
+    .fetch_all(pg)
+    .await?;
+    for row in r {
+        // Map the paths to their order and check if they are in order
+        println!("{:?}", row);
+        if let Some(paths) = &row.image_paths {
+            let pages: Vec<_> = paths
+                .iter()
+                .filter_map(|path| {
+                    let cap = re.captures(path)?;
+                    Some(cap.get(1).unwrap().as_str().parse::<i32>().unwrap())
+                })
+                .collect();
+            let mut pages_sorted = pages.clone();
+            pages_sorted.sort();
+
+            assert!(pages == pages_sorted, "{:?}", row);
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
@@ -359,5 +410,6 @@ async fn main() -> anyhow::Result<()> {
     println!("illust: {:?}", t.elapsed());
     novel(&mongo, &pg).await?;
     println!("novel: {:?}", t.elapsed());
+    test_image_order(&pg).await?;
     Ok(())
 }

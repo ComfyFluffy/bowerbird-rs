@@ -118,7 +118,7 @@ struct Cursor {
 
 #[derive(Debug, Clone, Deserialize)]
 struct TagFindForm {
-    ids: Option<Vec<i32>>,
+    ids: Option<Vec<i64>>,
     search: Option<String>,
     #[serde(flatten)]
     cursor: Cursor,
@@ -146,8 +146,8 @@ async fn find_tag(db: Data<PgPool>, form: Json<TagFindForm>) -> Result<Json<Vec<
             .filter(|v| !v.is_empty())
             .map(|v| format!("%{}%", v)),
     )
-    .bind(form.cursor.limit as i32)
-    .bind(form.cursor.offset as i32)
+    .bind(form.cursor.limit as i64)
+    .bind(form.cursor.offset as i64)
     .fetch_all(db.as_ref())
     .await
     .with_interal()?;
@@ -162,13 +162,13 @@ struct ItemsResponse<T> {
 
 #[derive(Debug, Clone, Deserialize)]
 struct IllustFindForm {
-    tag_ids: Option<Vec<i32>>,
-    tag_ids_exclude: Option<Vec<i32>>,
-    ids: Option<Vec<i32>>,
+    tag_ids: Option<Vec<i64>>,
+    tag_ids_exclude: Option<Vec<i64>>,
+    ids: Option<Vec<i64>>,
     search: Option<String>, // Search in title and caption
     date_range: Option<(OptionUtc, OptionUtc)>,
     bookmark_range: Option<(Option<u16>, Option<u16>)>, // (min, max)
-    parent_ids: Option<Vec<i32>>,
+    parent_ids: Option<Vec<i64>>,
     #[serde(flatten)]
     cursor: Cursor,
 }
@@ -232,8 +232,8 @@ async fn find_illust(
     .bind(form.parent_ids)
     .bind(form.tag_ids)
     .bind(form.tag_ids_exclude)
-    .bind(form.cursor.limit as i32)
-    .bind(form.cursor.offset as i32)
+    .bind(form.cursor.limit as i64)
+    .bind(form.cursor.offset as i64)
     .fetch_all(db.as_ref())
     .await
     .with_interal()?;
@@ -246,7 +246,7 @@ async fn find_illust(
 
 #[derive(Debug, Clone, Deserialize)]
 struct UserFindForm {
-    ids: Option<Vec<i32>>,
+    ids: Option<Vec<i64>>,
     search: Option<String>, // Search in name
     #[serde(flatten)]
     cursor: Cursor,
@@ -261,31 +261,10 @@ async fn find_user(
 
     let r = query_as(
         "
-        select count(*) over () _count,
-            i.id             id,
-            h.id             history_id,
-            source_id,
-            source_inaccessible,
-            is_followed,
-            total_following,
-            total_illust_series,
-            total_illusts,
-            total_manga,
-            total_novel_series,
-            total_novels,
-            total_public_bookmarks,
-            name,
-            region,
-            comment,
-            (select local_path from pixiv_media m where m.id = h.avatar_id) avatar_path,
-            (select local_path from pixiv_media m where m.id = h.background_id) background_path
-
-        from pixiv_user_history h
-                join (select max(id) id, item_id from pixiv_user_history group by item_id) sub using (id, item_id)
-                join pixiv_user i on i.id = h.item_id
-        
-        where 
-            ($1 is null or i.id = any($1))
+        select count(*) over () _count, *
+        from pixiv_illust_latest
+        where
+            ($1 is null or id = any($1))
             and ($2::text is null or name ilike $2)
 
         order by id desc
@@ -294,8 +273,8 @@ async fn find_user(
     )
     .bind(form.ids)
     .bind(form.search.map(|s| format!("%{}%", s)))
-    .bind(form.cursor.limit as i32)
-    .bind(form.cursor.offset as i32)
+    .bind(form.cursor.limit as i64)
+    .bind(form.cursor.offset as i64)
     .fetch_all(db.as_ref())
     .await
     .with_interal()?;

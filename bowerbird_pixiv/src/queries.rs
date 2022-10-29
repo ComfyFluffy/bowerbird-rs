@@ -54,7 +54,9 @@ pub async fn set_source_inaccessible(
     .bind(source_id)
     .execute(e)
     .await
-    .context(error::Database)?;
+    .with_context(|_| error::Database {
+        message: format!("set_source_inaccessible: {:?}, {:?}", table_name, source_id),
+    })?;
     Ok(())
 }
 
@@ -87,7 +89,9 @@ pub mod user {
         )
         .fetch_optional(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!("avatar_url_by_user_id: {:?}", user_id),
+        })?
         .and_then(|row| row.url))
     }
 
@@ -109,7 +113,9 @@ pub mod user {
             )
             .fetch_one(e)
             .await
-            .context(error::Database)?
+            .with_context(|_| error::Database {
+                message: format!("upsert_basic_returning_updated_at: {:?}", user_id)
+            })?
             .updated_at
         };
         Ok(updated_at)
@@ -120,7 +126,7 @@ pub mod user {
         user: &User,
         profile: &Profile,
         e: impl PgExecutor<'_>,
-    ) -> Result<i32> {
+    ) -> Result<i64> {
         let id = query!(
             "
             update pixiv_user set
@@ -149,14 +155,19 @@ pub mod user {
         )
         .fetch_one(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!(
+                "update_item_returning_id: {:?}, {:?}, {:?}",
+                source_id, user, profile
+            ),
+        })?
         .id;
         Ok(id)
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn update_history(
-        item_id: i32,
+        item_id: i64,
         user: &User,
         profile: &Profile,
         workspace: Workspace,
@@ -246,7 +257,9 @@ pub mod user {
         .bind(workspace)
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("update_history: {:?}, {:?}, {:?}", item_id, user, profile),
+        })?;
         Ok(())
     }
 }
@@ -257,21 +270,24 @@ pub mod tag {
     pub async fn id_by_alias_match(
         alias: &[String],
         e: impl PgExecutor<'_>,
-    ) -> Result<Option<i32>> {
+    ) -> Result<Option<i64>> {
         let id = query!(
             "
             select id from pixiv_tag where alias && $1::varchar[]
+            order by id asc limit 1
             ",
-            &alias
+            alias
         )
         .fetch_optional(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!("id_by_alias_match: {:?}", alias),
+        })?
         .map(|row| row.id);
         Ok(id)
     }
 
-    pub async fn update_unique(id: i32, alias: &[String], e: impl PgExecutor<'_>) -> Result<()> {
+    pub async fn update_unique(id: i64, alias: &[String], e: impl PgExecutor<'_>) -> Result<()> {
         query!(
             "
             update pixiv_tag set
@@ -283,7 +299,9 @@ pub mod tag {
         )
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("update_unique: {:?}, {:?}", id, alias),
+        })?;
         Ok(())
     }
 }
@@ -304,7 +322,9 @@ pub mod media {
         )
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("insert_urls: {:?}", urls),
+        })?;
         Ok(())
     }
 
@@ -316,7 +336,7 @@ pub mod media {
         width: Option<i32>,
         height: Option<i32>,
         e: impl PgExecutor<'_>,
-    ) -> Result<i32> {
+    ) -> Result<i64> {
         let id = query!(
             "
             update pixiv_media set
@@ -337,12 +357,17 @@ pub mod media {
         )
         .fetch_one(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!(
+                "update_returning_id: {:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
+                url, size, mime, local_path, width, height
+            ),
+        })?
         .id;
         Ok(id)
     }
 
-    pub async fn insert_colors(media_id: i32, hsv: &[Hsv], e: impl PgExecutor<'_>) -> Result<()> {
+    pub async fn insert_colors(media_id: i64, hsv: &[Hsv], e: impl PgExecutor<'_>) -> Result<()> {
         let mut q = QueryBuilder::new(
             "
             insert into pixiv_media_color (media_id, h, s, v)
@@ -361,7 +386,12 @@ pub mod media {
             where not exists (select id from pixiv_media_color where media_id = $1)
             ",
         );
-        q.build().execute(e).await.context(error::Database)?;
+        q.build()
+            .execute(e)
+            .await
+            .with_context(|_| error::Database {
+                message: format!("insert_colors: {:?}, {:?}", media_id, hsv),
+            })?;
         Ok(())
     }
 
@@ -384,7 +414,9 @@ pub mod media {
         )
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("insert_ugoira: {:?}, {:?}, {:?}", url, local_path, size),
+        })?;
         Ok(())
     }
 
@@ -405,7 +437,9 @@ pub mod media {
         )
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("insert_ugoira_mp4: {:?}, {:?}", local_path, size),
+        })?;
         Ok(())
     }
 
@@ -418,7 +452,9 @@ pub mod media {
         )
         .fetch_optional(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("local_path_exists: {:?}", local_path),
+        })?;
         Ok(r.is_some())
     }
 }
@@ -428,7 +464,7 @@ pub mod illust {
 
     use super::*;
 
-    pub async fn upsert_item_returning_id(illust: &Illust, e: impl PgExecutor<'_>) -> Result<i32> {
+    pub async fn upsert_item_returning_id(illust: &Illust, e: impl PgExecutor<'_>) -> Result<i64> {
         let alias: Vec<String> = flatten_tags_alias(illust.tags.iter())
             .into_iter()
             .map(|x| x.to_string())
@@ -465,60 +501,76 @@ pub mod illust {
         )
         .fetch_one(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!("upsert_item_returning_id: {:?}", illust),
+        })?
         .id;
         Ok(id)
     }
 
-    pub async fn insert_history(
-        item_id: i32,
+    pub async fn insert_history_returning_id(
+        item_id: i64,
         illust: &Illust,
-        image_urls: &[&str],
         delay_slice: Option<&[i32]>,
         e: impl PgExecutor<'_>,
-    ) -> Result<()> {
-        let media_ids = "
-        (select array_agg(id order by i)
-        from pixiv_media
-               join unnest(
-                   $6::varchar[]
-               )
-               with ordinality urls(url, i) using (url))
-        ";
-
-        query(
-            &format!("
-            insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, media_ids, ugoira_frame_duration)
+    ) -> Result<Option<i64>> {
+        let id = query!(
+            "
+            insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, ugoira_frame_duration)
             select
                 $1,
                 $2::varchar,
                 $3,
                 $4::varchar,
                 $5,
-                {media_ids},
-                $7
+                $6
             where not exists (
                 select id from pixiv_illust_history where 
                 item_id = $1
-                and illust_type {EQ} $2
-                and caption_html {EQ} $3
-                and title {EQ} $4
-                and date {EQ} $5
-                and media_ids {EQ} {media_ids}
-                and ugoira_frame_duration {EQ} $7
+                and illust_type IS NOT DISTINCT FROM $2
+                and caption_html IS NOT DISTINCT FROM $3
+                and title IS NOT DISTINCT FROM $4
+                and date IS NOT DISTINCT FROM $5
+                and ugoira_frame_duration IS NOT DISTINCT FROM $6
             )
-            ")
+            returning id
+            ",
+            item_id,
+            illust.r#type,
+            illust.caption,
+            illust.title,
+            illust.create_date,
+            delay_slice,
         )
-        .bind(item_id)
-        .bind(&illust.r#type)
-        .bind(&illust.caption)
-        .bind(&illust.title)
-        .bind(illust.create_date)
-        .bind(image_urls)
-        .bind(delay_slice)
+        .fetch_optional(e)
+        .await
+        .with_context(|_| error::Database {
+            message: format!("insert_history_returning_id: {:?}, {:?}", item_id, illust),
+        })?
+        .map(|r| r.id);
+        Ok(id)
+    }
+
+    pub async fn insert_history_media(
+        history_id: i64,
+        media_urls: &[String],
+        e: impl PgExecutor<'_>,
+    ) -> Result<()> {
+        query!(
+            "
+            insert into pixiv_illust_history_media (history_id, media_id)
+            select $1, id
+            from pixiv_media
+                join unnest($2::varchar[]) url using (url)
+            ",
+            history_id,
+            media_urls
+        )
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("insert_history_media: {:?}, {:?}", history_id, media_urls),
+        })?;
         Ok(())
     }
 }
@@ -528,7 +580,7 @@ pub mod novel {
 
     use super::*;
 
-    pub async fn upsert_item_returning_id(n: &Novel, e: impl PgExecutor<'_>) -> Result<i32> {
+    pub async fn upsert_item_returning_id(n: &Novel, e: impl PgExecutor<'_>) -> Result<i64> {
         let alias: Vec<&str> = flatten_tags_alias(n.tags.iter()).into_iter().collect();
         let id = query_unchecked!(
             "
@@ -554,7 +606,7 @@ pub mod novel {
             returning id
             ",
             n.user.id.to_string(),
-            &n.id.to_string(),
+            n.id.to_string(),
             n.total_bookmarks,
             n.total_view,
             n.is_bookmarked,
@@ -562,12 +614,14 @@ pub mod novel {
         )
         .fetch_one(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!("upsert_item_returning_id: {:?}", n),
+        })?
         .id;
         Ok(id)
     }
 
-    pub async fn history_exists(item_id: i32, e: impl PgExecutor<'_>) -> Result<bool> {
+    pub async fn history_exists(item_id: i64, e: impl PgExecutor<'_>) -> Result<bool> {
         let exists = query!(
             "
             select id from pixiv_novel_history where item_id = $1 limit 1
@@ -576,18 +630,20 @@ pub mod novel {
         )
         .fetch_optional(e)
         .await
-        .context(error::Database)?
+        .with_context(|_| error::Database {
+            message: format!("history_exists: {:?}", item_id),
+        })?
         .is_some();
         Ok(exists)
     }
 
     pub async fn insert_history(
-        item_id: i32,
+        item_id: i64,
         n: &Novel,
         novel_text: &str,
         e: impl PgExecutor<'_>,
     ) -> Result<()> {
-        query(&format!(
+        query!(
             "
             insert into pixiv_novel_history (item_id, title, date, caption_html, text)
             select
@@ -599,21 +655,23 @@ pub mod novel {
             where not exists (
                 select id from pixiv_novel_history where 
                 item_id = $1
-                and title {EQ} $2
-                and date {EQ} $3
-                and caption_html {EQ} $4
-                and text {EQ} $5
+                and title IS NOT DISTINCT FROM $2
+                and date IS NOT DISTINCT FROM $3
+                and caption_html IS NOT DISTINCT FROM $4
+                and text IS NOT DISTINCT FROM $5
             )
-            "
-        ))
-        .bind(item_id)
-        .bind(&n.title)
-        .bind(n.create_date.naive_utc())
-        .bind(&n.caption)
-        .bind(novel_text)
+            ",
+            item_id,
+            n.title,
+            n.create_date,
+            n.caption,
+            novel_text,
+        )
         .execute(e)
         .await
-        .context(error::Database)?;
+        .with_context(|_| error::Database {
+            message: format!("insert_history: {:?}, {:?}", item_id, n),
+        })?;
 
         Ok(())
     }

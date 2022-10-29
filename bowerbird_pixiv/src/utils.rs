@@ -140,23 +140,20 @@ where
     let mut tries = 0;
     loop {
         tries += 1;
-        match pager.try_next().await.context(error::PixivApi) {
+        match pager.next().await {
             Ok(r) => {
                 return Ok(r);
             }
             Err(e) => {
-                if let error::Error::PixivApi {
-                    source: pixivcrab::error::Error::HTTP { .. },
-                    ..
-                } = &e
-                {
+                println!("error: {:?}", e);
+                if let pixivcrab::error::Error::Http { .. } = &e {
                     if tries <= max_tries {
                         warn!("retrying on pixiv api error: {}", e);
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 }
-                return Err(e);
+                return Err(e).context(error::PixivApi);
             }
         }
     }

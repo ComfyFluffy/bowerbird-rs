@@ -126,7 +126,7 @@ pub async fn check_ffmpeg(path: &str) -> Option<PathBuf> {
 
     let mut ffmpeg = Command::new(&ffmpeg_path);
     ffmpeg.args(["-hide_banner", "-loglevel", "error"]);
-    match ffmpeg.spawn().context(error::FFmpegNotFound {
+    match ffmpeg.spawn().with_context(|_| error::FFmpegNotFound {
         path: ffmpeg_path.clone(),
     }) {
         Ok(mut child) => {

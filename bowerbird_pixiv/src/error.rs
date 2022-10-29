@@ -10,8 +10,14 @@ pub enum Error {
     #[snafu(display("unknown data from pixiv: {message}"))]
     UnknownData { message: String },
 
-    #[snafu(display("database: {source}"))]
-    Database { source: sqlx::Error },
+    #[snafu(display("{message}: {source}"))]
+    Database {
+        source: sqlx::Error,
+        message: String,
+    },
+
+    #[snafu(display("error on database transaction: {source}"))]
+    DatabaseTransaction { source: sqlx::Error },
 
     #[snafu(display("config: {source}"))]
     Config {

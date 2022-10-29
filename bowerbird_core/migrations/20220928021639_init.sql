@@ -1,6 +1,6 @@
 create table pixiv_media
 (
-    id          serial
+    id          bigint generated always as identity
         constraint pixiv_media_pk
             primary key,
     url         varchar(256),
@@ -18,10 +18,10 @@ create unique index pixiv_media_local_path_uindex
 
 create table pixiv_media_color
 (
-    id       serial
+    id       bigint generated always as identity
         constraint pixiv_media_color_pk
             primary key,
-    media_id integer
+    media_id bigint
         constraint pixiv_media_color_pixiv_media_null_fk
             references pixiv_media,
     h        double precision,
@@ -32,7 +32,7 @@ create table pixiv_media_color
 
 create table pixiv_tag
 (
-    id    serial
+    id    bigint generated always as identity
         constraint pixiv_tag_pk
             primary key,
     alias varchar(128)[]
@@ -43,10 +43,10 @@ create index pixiv_tag_alias_index
 
 create table pixiv_user
 (
-    id                     serial
+    id                     bigint generated always as identity
         constraint pixiv_user_pk
             primary key,
-    source_id              varchar(24),
+    source_id              varchar(128),
     inserted_at            timestamp with time zone default now(),
     updated_at             timestamp with time zone,
     source_inaccessible    boolean                  default false not null,
@@ -64,19 +64,19 @@ create unique index pixiv_user_source_id_uindex
 
 create table pixiv_user_history
 (
-    id                 serial
+    id                 bigint generated always as identity
         constraint pixiv_user_history_pk
             primary key,
-    item_id            integer
+    item_id            bigint
         constraint pixiv_user_history_pixiv_user_null_fk
             references pixiv_user,
-    workspace_image_id integer
+    workspace_image_id bigint
         constraint pixiv_user_history_pixiv_media_null_fk_workspace_image_id
             references pixiv_media,
-    background_id      integer
+    background_id      bigint
         constraint pixiv_user_history_pixiv_media_null_fk_background_id
             references pixiv_media,
-    avatar_id          integer
+    avatar_id          bigint
         constraint pixiv_user_history_pixiv_media_null_fk_avatar_id
             references pixiv_media,
     inserted_at        timestamp with time zone default now(),
@@ -84,41 +84,41 @@ create table pixiv_user_history
     name               varchar(128),
     is_premium         boolean,
     birth              date,
-    region             varchar(64),
+    region             varchar(128),
     gender             varchar(8),
     comment            text,
-    twitter_account    varchar(64),
-    web_page           varchar(256),
+    twitter_account    varchar(128),
+    web_page           varchar(512),
     workspace          jsonb
 );
 
 
 create table pixiv_illust
 (
-    id                  serial
+    id                  bigint generated always as identity
         constraint pixiv_illust_pk
             primary key,
-    parent_id           integer
+    parent_id           bigint
         constraint pixiv_illust_pixiv_user_null_fk
             references pixiv_user,
-    source_id           varchar(24),
+    source_id           varchar(128),
     inserted_at         timestamp with time zone default now(),
     updated_at          timestamp with time zone,
     source_inaccessible boolean                  default false not null,
     total_bookmarks     integer,
     total_view          integer,
     is_bookmarked       boolean,
-    tag_ids             integer[]
+    tag_ids             bigint[]
 );
 create unique index pixiv_illust_source_id_uindex
     on pixiv_illust (source_id);
 
 create table pixiv_illust_history
 (
-    id                    serial
+    id                    bigint generated always as identity
         constraint pixiv_illust_history_pk
             primary key,
-    item_id               integer
+    item_id               bigint
         constraint pixiv_illust_history_pixiv_illust_null_fk
             references pixiv_illust,
     inserted_at           timestamp with time zone default now(),
@@ -126,45 +126,65 @@ create table pixiv_illust_history
     caption_html          text,
     title                 varchar(256),
     date                  timestamp with time zone,
-    media_ids             integer[],
     ugoira_frame_duration integer[]
 );
+create table pixiv_illust_history_media
+(
+    id         bigint generated always as identity
+        constraint pixiv_illust_history_media_pk
+            primary key,
+    history_id bigint not null
+        constraint pixiv_illust_history_media_pixiv_illust_history_null_fk
+            references pixiv_illust_history (id),
+    media_id   bigint not null
+        constraint pixiv_illust_history_media_pixiv_media_null_fk
+            references pixiv_media (id)
+);
+
+create index pixiv_illust_history_media_history_id_index
+    on pixiv_illust_history_media (history_id);
+
+create unique index pixiv_illust_history_media_history_id_media_id_uindex
+    on pixiv_illust_history_media (history_id, media_id);
+
+create index pixiv_illust_history_media_media_id_index
+    on pixiv_illust_history_media (media_id);
 
 
 create table pixiv_novel
 (
-    id                  serial
+    id                  bigint generated always as identity
         constraint pixiv_novel_pk
             primary key,
-    parent_id           integer
+    parent_id           bigint
         constraint pixiv_novel_pixiv_user_null_fk
             references pixiv_user,
-    source_id           varchar(24),
+    source_id           varchar(128),
     inserted_at         timestamp with time zone default now(),
     updated_at          timestamp with time zone,
     source_inaccessible boolean                  default false not null,
     total_bookmarks     integer,
     total_view          integer,
     is_bookmarked       boolean,
-    tag_ids             integer[]
+    tag_ids             bigint[]
 );
 create unique index pixiv_novel_source_id_uindex
     on pixiv_novel (source_id);
 
 create table pixiv_novel_history
 (
-    id             serial
+    id             bigint generated always as identity
         constraint pixiv_novel_history_pk
             primary key,
-    item_id        integer
+    item_id        bigint
         constraint pixiv_novel_history_pixiv_novel_null_fk
             references pixiv_novel,
-    cover_image_id integer
+    cover_image_id bigint
         constraint pixiv_novel_history_pixiv_media_null_fk
             references pixiv_media,
     inserted_at    timestamp with time zone default now(),
     title          varchar(256),
     caption_html   text,
     text           text,
-    date           timestamp
+    date           timestamp with time zone
 );

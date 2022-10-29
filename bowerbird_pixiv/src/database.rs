@@ -1,6 +1,6 @@
 use bowerbird_utils::{try_skip, ImageMetadata};
 use chrono::Utc;
-use log::{debug, info, warn};
+use log::{info, warn};
 use path_slash::PathBufExt;
 use snafu::ResultExt;
 use sqlx::{query, PgPool};
@@ -39,7 +39,7 @@ async fn update_users(
     out_of_date_duration: Duration,
     mut on_need_update: impl FnMut(&str),
 ) -> Result<()> {
-    let mut tx = db.begin().await.context(error::Database)?;
+    let mut tx = db.begin().await.context(error::DatabaseTransaction)?;
     #[allow(clippy::or_fun_call)] // The call is actually inlined as a constant
     let out_of_date_duration =
         chrono::Duration::from_std(out_of_date_duration).unwrap_or(chrono::Duration::max_value());
@@ -62,13 +62,12 @@ async fn update_users(
                 false
             }
         })();
-        debug!("{user:?}: {user_up_to_date}, {updated_at:?}, {avatar_url:?}");
         // Do not insert to update list if updated within the given duration and the avatar is up-to-date.
         if !user_up_to_date {
             on_need_update(&user_id);
         }
     }
-    tx.commit().await.context(error::Database)?;
+    tx.commit().await.context(error::DatabaseTransaction)?;
     Ok(())
 }
 
@@ -81,7 +80,7 @@ async fn update_tags(
         .into_iter()
         .map(|x| x.into_iter().map(|x| x.to_string()).collect())
         .collect();
-    let mut tx = db.begin().await.context(error::Database)?;
+    let mut tx = db.begin().await.context(error::DatabaseTransaction)?;
     for alias in tags {
         let id = tag::id_by_alias_match(&alias, &mut tx).await?;
 
@@ -97,10 +96,10 @@ async fn update_tags(
             )
             .execute(&mut tx)
             .await
-            .context(error::Database)?;
+            .context(error::DatabaseTransaction)?;
         };
     }
-    tx.commit().await.context(error::Database)?;
+    tx.commit().await.context(error::DatabaseTransaction)?;
 
     Ok(())
 }
@@ -127,11 +126,10 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> Result<()> {
         .user_detail(user_id)
         .await
         .context(error::PixivApi)?;
-    debug!("pixiv user data: {:?}", resp);
 
     let user = resp.user;
     let profile = resp.profile;
-    let mut tx = kit.db.begin().await.context(error::Database)?;
+    let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
 
     let item_id = user::update_item_returning_id(user_id, &user, &profile, &mut tx).await?;
 
@@ -172,7 +170,7 @@ async fn update_user_detail(user_id: &str, kit: &PixivKit) -> Result<()> {
     )
     .await?;
 
-    tx.commit().await.context(error::Database)?;
+    tx.commit().await.context(error::DatabaseTransaction)?;
 
     if let Some(avatar_url) = avatar_url {
         download_other_image("avatar", avatar_url, kit).await?;
@@ -196,7 +194,7 @@ pub async fn save_image(
     path_db: String,
 ) -> Result<()> {
     let mime = mime_guess::from_path(path).first().map(|x| x.to_string());
-    let mut tx = db.begin().await.context(error::Database)?;
+    let mut tx = db.begin().await.context(error::DatabaseTransaction)?;
 
     let w: Option<i32> = img_metadata.as_ref().and_then(|x| x.width.try_into().ok());
     let h: Option<i32> = img_metadata.as_ref().and_then(|x| x.height.try_into().ok());
@@ -207,7 +205,7 @@ pub async fn save_image(
         media::insert_colors(id, &img_metadata.hsv_palette, &mut tx).await?;
     }
 
-    tx.commit().await.context(error::Database)?;
+    tx.commit().await.context(error::DatabaseTransaction)?;
     Ok(())
 }
 
@@ -219,7 +217,7 @@ pub async fn save_image_ugoira(
     zip_size: i32,
     with_mp4: bool,
 ) -> anyhow::Result<()> {
-    let mut tx = db.begin().await.context(error::Database)?;
+    let mut tx = db.begin().await.context(error::DatabaseTransaction)?;
     media::insert_ugoira(&zip_url, &zip_path_db, zip_size, &mut tx).await?;
 
     if with_mp4 {
@@ -238,7 +236,7 @@ pub async fn save_image_ugoira(
 
         media::insert_ugoira_mp4(&mp4_path_db, size, &mut tx).await?;
     }
-    tx.commit().await.context(error::Database)?;
+    tx.commit().await.context(error::DatabaseTransaction)?;
     Ok(())
 }
 
@@ -276,7 +274,7 @@ pub async fn save_illusts(
         };
         let delay_slice = delay.as_deref();
 
-        let mut tx = kit.db.begin().await.context(error::Database)?;
+        let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
         if !i.visible {
             if i.id != 0 {
                 warn!("pixiv: Works {} is invisible!", id);
@@ -302,9 +300,13 @@ pub async fn save_illusts(
         let urls_str = urls.iter().map(|x| x.as_str()).collect::<Vec<_>>();
 
         media::insert_urls(&urls_str, &mut tx).await?;
-        illust::insert_history(item_id, i, &urls_str, delay_slice, &mut tx).await?;
+        if let Some(history_id) =
+            illust::insert_history_returning_id(item_id, i, delay_slice, &mut tx).await?
+        {
+            illust::insert_history_media(history_id, &urls, &mut tx).await?;
+        }
 
-        tx.commit().await.context(error::Database)?;
+        tx.commit().await.context(error::DatabaseTransaction)?;
     }
     Ok(())
 }
@@ -328,7 +330,7 @@ pub async fn save_novels(
         info!("pixiv: getting novel text of {}", id);
         let r = kit.api.novel_text(&id).await.context(error::PixivApi)?;
 
-        let mut tx = kit.db.begin().await.context(error::Database)?;
+        let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
         if !on_each_should_continue() {
             return Ok(());
         }
@@ -347,7 +349,7 @@ pub async fn save_novels(
         }
 
         novel::insert_history(item_id, n, &r.novel_text, &mut tx).await?;
-        tx.commit().await.context(error::Database)?;
+        tx.commit().await.context(error::DatabaseTransaction)?;
     }
 
     Ok(())
