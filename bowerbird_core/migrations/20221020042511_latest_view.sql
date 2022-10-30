@@ -15,10 +15,10 @@ select i.id                         id,
        title,
        date,
        ugoira_frame_duration,
-       (select array_agg(local_path)
+       (select array_agg(local_path order by hm.id)
         from pixiv_media m
                  join pixiv_illust_history_media hm on m.id = hm.media_id
-        where hm.history_id = i.id) image_paths
+        where hm.history_id = h.id) image_paths
 
 from pixiv_illust_history h
          join (select max(id) id, item_id from pixiv_illust_history group by item_id) sub using (id, item_id)

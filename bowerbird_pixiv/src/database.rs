@@ -301,7 +301,7 @@ pub async fn save_illusts(
 
         media::insert_urls(&urls_str, &mut tx).await?;
         if let Some(history_id) =
-            illust::insert_history_returning_id(item_id, i, delay_slice, &mut tx).await?
+            illust::insert_history_returning_id(item_id, i, &urls, delay_slice, &mut tx).await?
         {
             illust::insert_history_media(history_id, &urls, &mut tx).await?;
         }

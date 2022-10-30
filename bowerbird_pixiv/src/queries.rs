@@ -511,9 +511,11 @@ pub mod illust {
     pub async fn insert_history_returning_id(
         item_id: i64,
         illust: &Illust,
+        urls: &[String],
         delay_slice: Option<&[i32]>,
         e: impl PgExecutor<'_>,
     ) -> Result<Option<i64>> {
+        // TODO: use latest view to decide whether to insert
         let id = query!(
             "
             insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, ugoira_frame_duration)

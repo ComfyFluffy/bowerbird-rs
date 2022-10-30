@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use chrono::NaiveDate;
-use futures::TryStreamExt;
 use lazy_static::lazy_static;
 use log::warn;
 use pixivcrab::Pager;

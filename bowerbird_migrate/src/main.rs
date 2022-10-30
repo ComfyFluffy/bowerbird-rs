@@ -376,7 +376,6 @@ async fn test_image_order(pg: &Pool<Postgres>) -> anyhow::Result<()> {
     .await?;
     for row in r {
         // Map the paths to their order and check if they are in order
-        println!("{:?}", row);
         if let Some(paths) = &row.image_paths {
             let pages: Vec<_> = paths
                 .iter()
@@ -388,7 +387,9 @@ async fn test_image_order(pg: &Pool<Postgres>) -> anyhow::Result<()> {
             let mut pages_sorted = pages.clone();
             pages_sorted.sort();
 
-            assert!(pages == pages_sorted, "{:?}", row);
+            if pages != pages_sorted {
+                println!("pages not correctly sorted: {:?}", row);
+            }
         }
     }
     Ok(())
@@ -398,6 +399,12 @@ async fn test_image_order(pg: &Pool<Postgres>) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let (mongo, pg) = get_db().await?;
+
+    // do tests only if with arg '--test-only'
+    if std::env::args().any(|v| v == "--test-only") {
+        test_image_order(&pg).await?;
+        return Ok(());
+    }
     bowerbird_core::migrate(&pg).await?;
     let t = Instant::now();
     images(&mongo, &pg).await?;
