@@ -119,6 +119,20 @@ create index pixiv_illust_parent_id_index
 create unique index pixiv_illust_source_id_uindex
     on pixiv_illust (source_id);
 
+create table pixiv_illust_history_type
+(
+    id   smallint generated always as identity
+        constraint pixiv_illust_history_type_pk
+            primary key,
+    name varchar(16) not null
+);
+create unique index pixiv_illust_history_type_name_uindex
+    on pixiv_illust_history_type (name);
+insert into pixiv_illust_history_type (name)
+values ('illust'),
+       ('manga'),
+       ('ugoira');
+
 create table pixiv_illust_history
 (
     id                    bigint generated always as identity
@@ -127,8 +141,10 @@ create table pixiv_illust_history
     item_id               bigint
         constraint pixiv_illust_history_pixiv_illust_null_fk
             references pixiv_illust,
+    type_id               smallint
+        constraint pixiv_illust_history_pixiv_illust_history_type_null_fk
+            references pixiv_illust_history_type (id),
     inserted_at           timestamp with time zone default now(),
-    illust_type           varchar(10),
     caption_html          text,
     title                 varchar(256),
     date                  timestamp with time zone,
@@ -136,6 +152,8 @@ create table pixiv_illust_history
 );
 create index pixiv_illust_history_item_id_index
     on pixiv_illust_history (item_id);
+create index pixiv_illust_history_type_id_index
+    on pixiv_illust_history (type_id);
 
 create table pixiv_illust_history_media
 (
@@ -187,6 +205,9 @@ create table pixiv_novel_history
     item_id        bigint
         constraint pixiv_novel_history_pixiv_novel_null_fk
             references pixiv_novel,
+    cover_image_id bigint
+        constraint pixiv_novel_history_pixiv_media_null_fk
+            references pixiv_media,
     inserted_at    timestamp with time zone default now(),
     title          varchar(256),
     caption_html   text,

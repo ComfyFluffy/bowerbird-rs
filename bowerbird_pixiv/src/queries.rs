@@ -504,9 +504,9 @@ pub mod illust {
     ) -> Result<Option<i64>> {
         let id = query!(
             "
-            insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, ugoira_frame_duration)
+            insert into pixiv_illust_history (item_id, type_id, caption_html, title, date, ugoira_frame_duration)
             select $1,
-                $2::varchar,
+                (select id from pixiv_illust_history_type where name = $2::varchar),
                 $3,
                 $4::varchar,
                 $5,

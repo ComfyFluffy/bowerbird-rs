@@ -214,7 +214,7 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                 "
                     INSERT INTO pixiv_illust_history (
                         item_id, 
-                        illust_type,
+                        type_id,
                         caption_html,
                         title,
                         date,
@@ -222,7 +222,7 @@ async fn illust(mongo: &Database, pg: &Pool<Postgres>) -> anyhow::Result<()> {
                         inserted_at
                     ) VALUES (
                         $1,
-                        $2,
+                        (select id from pixiv_illust_history_type where name = $2),
                         $3,
                         $4,
                         $5,
