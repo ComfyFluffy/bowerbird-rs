@@ -28,6 +28,8 @@ create table pixiv_media_color
     s        double precision,
     v        double precision
 );
+create index pixiv_media_color_media_id_index
+    on pixiv_media_color (media_id);
 
 
 create table pixiv_tag
@@ -91,6 +93,8 @@ create table pixiv_user_history
     web_page           varchar(512),
     workspace          jsonb
 );
+create index pixiv_user_history_item_id_index
+    on pixiv_user_history (item_id);
 
 
 create table pixiv_illust
@@ -110,6 +114,8 @@ create table pixiv_illust
     is_bookmarked       boolean,
     tag_ids             bigint[]
 );
+create index pixiv_illust_parent_id_index
+    on pixiv_illust (parent_id);
 create unique index pixiv_illust_source_id_uindex
     on pixiv_illust (source_id);
 
@@ -128,6 +134,9 @@ create table pixiv_illust_history
     date                  timestamp with time zone,
     ugoira_frame_duration integer[]
 );
+create index pixiv_illust_history_item_id_index
+    on pixiv_illust_history (item_id);
+
 create table pixiv_illust_history_media
 (
     id         bigint generated always as identity
@@ -140,13 +149,10 @@ create table pixiv_illust_history_media
         constraint pixiv_illust_history_media_pixiv_media_null_fk
             references pixiv_media (id)
 );
-
 create index pixiv_illust_history_media_history_id_index
     on pixiv_illust_history_media (history_id);
-
 create unique index pixiv_illust_history_media_history_id_media_id_uindex
     on pixiv_illust_history_media (history_id, media_id);
-
 create index pixiv_illust_history_media_media_id_index
     on pixiv_illust_history_media (media_id);
 
@@ -170,6 +176,8 @@ create table pixiv_novel
 );
 create unique index pixiv_novel_source_id_uindex
     on pixiv_novel (source_id);
+create index pixiv_novel_parent_id_index
+    on pixiv_novel (parent_id);
 
 create table pixiv_novel_history
 (
@@ -179,12 +187,11 @@ create table pixiv_novel_history
     item_id        bigint
         constraint pixiv_novel_history_pixiv_novel_null_fk
             references pixiv_novel,
-    cover_image_id bigint
-        constraint pixiv_novel_history_pixiv_media_null_fk
-            references pixiv_media,
     inserted_at    timestamp with time zone default now(),
     title          varchar(256),
     caption_html   text,
     text           text,
     date           timestamp with time zone
 );
+create index pixiv_novel_history_item_id_index
+    on pixiv_novel_history (item_id);

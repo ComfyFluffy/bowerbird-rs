@@ -6,13 +6,6 @@ use sqlx::{query, query_unchecked, PgExecutor, QueryBuilder};
 
 use crate::{error, Result};
 
-/// Equal, treating null as a comparable value.
-///
-/// Used for upserting.
-///
-/// https://www.postgresql.org/docs/current/functions-comparison.html
-const EQ: &str = "IS NOT DISTINCT FROM";
-
 pub fn flatten_alias(tag: &pixivcrab::models::Tag) -> Vec<&str> {
     let mut alias: Vec<&str> = vec![];
     if !tag.name.is_empty() {
@@ -199,62 +192,59 @@ pub mod user {
         let web_page = filter_empty!(profile.webpage);
         let region = filter_empty!(profile.region);
 
-        let workspace_image_id = "(select id from pixiv_media where url = $2)";
-        let background_id = "(select id from pixiv_media where url = $3)";
-        let avatar_id = "(select id from pixiv_media where url = $4)";
-        query(
-        &format!("
+        query!(
+            "
             insert into pixiv_user_history (item_id, workspace_image_id, background_id, avatar_id, account,
-                name, is_premium, birth, region, gender, comment, twitter_account, web_page,
-                workspace)
-            select 
-                $1,
-                {workspace_image_id},
-                {background_id},
-                {avatar_id},
-                $5::varchar,
-                $6::varchar,
-                $7,
-                $8,
-                $9::varchar,
-                $10::varchar,
-                $11,
-                $12::varchar,
-                $13::varchar,
-                $14
-            where not exists (
-                select id from pixiv_user_history where
-                item_id = $1
-                and workspace_image_id {EQ} {workspace_image_id}
-                and background_id {EQ} {background_id}
-                and avatar_id {EQ} {avatar_id}
-                and account {EQ} $5
-                and name {EQ} $6
-                and is_premium {EQ} $7
-                and birth {EQ} $8
-                and region {EQ} $9
-                and gender {EQ} $10
-                and comment {EQ} $11
-                and twitter_account {EQ} $12
-                and web_page {EQ} $13
-                and workspace {EQ} $14
-            )
-            "),
+                                            name, is_premium, birth, region, gender, comment, twitter_account, web_page,
+                                            workspace)
+            select $1,
+                   (select id from pixiv_media where url = $2),
+                   (select id from pixiv_media where url = $3),
+                   (select id from pixiv_media where url = $4),
+                   $5::varchar,
+                   $6::varchar,
+                   $7,
+                   $8,
+                   $9::varchar,
+                   $10::varchar,
+                   $11,
+                   $12::varchar,
+                   $13::varchar,
+                   $14
+            where not exists(
+                    select id
+                    from pixiv_user_latest
+                    where id = $1
+                      and workspace_image_url IS NOT DISTINCT FROM $2
+                      and background_url IS NOT DISTINCT FROM $3
+                      and avatar_url IS NOT DISTINCT FROM $4
+                      and account IS NOT DISTINCT FROM $5
+                      and name IS NOT DISTINCT FROM $6
+                      and is_premium IS NOT DISTINCT FROM $7
+                      and birth IS NOT DISTINCT FROM $8
+                      and region IS NOT DISTINCT FROM $9
+                      and gender IS NOT DISTINCT FROM $10
+                      and comment IS NOT DISTINCT FROM $11
+                      and twitter_account IS NOT DISTINCT FROM $12
+                      and web_page IS NOT DISTINCT FROM $13
+                      and workspace IS NOT DISTINCT FROM $14
+                )
+            ",
+            item_id,
+            workspace_image_url,
+            background_url,
+            avatar_url,
+            &user.account,
+            &user.name,
+            profile.is_premium,
+            parse_birth(&profile.birth),
+            region,
+            gender,
+            comment,
+            twitter_account,
+            web_page,
+            workspace,
         )
-        .bind(item_id)
-        .bind(&workspace_image_url)
-        .bind(&background_url)
-        .bind(&avatar_url)
-        .bind(&user.account)
-        .bind(&user.name)
-        .bind(profile.is_premium)
-        .bind(parse_birth(&profile.birth))
-        .bind(region)
-        .bind(gender)
-        .bind(comment)
-        .bind(twitter_account)
-        .bind(web_page)
-        .bind(workspace)
         .execute(e)
         .await
         .with_context(|_| error::Database {
@@ -472,24 +462,21 @@ pub mod illust {
         let id = query!(
             "
             insert into pixiv_illust (parent_id, source_id, total_bookmarks, total_view,
-                is_bookmarked, tag_ids, source_inaccessible, updated_at)
-            values (
-                (select id from pixiv_user where source_id = $1),
-                $2,
-                $3,
-                $4,
-                $5, 
-                (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
-                false,
-                now()
-            )
-            on conflict (source_id) do update set
-                total_bookmarks = $3,
-                total_view = $4,
-                is_bookmarked = $5,
-                tag_ids = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
-                source_inaccessible = false,
-                updated_at = now()
+                                      is_bookmarked, tag_ids, source_inaccessible, updated_at)
+            values ((select id from pixiv_user where source_id = $1),
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
+                    false,
+                    now())
+            on conflict (source_id) do update set total_bookmarks     = $3,
+                                                  total_view          = $4,
+                                                  is_bookmarked       = $5,
+                                                  tag_ids             = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
+                                                  source_inaccessible = false,
+                                                  updated_at          = now()
             returning id
             ",
             illust.user.id.to_string(),
@@ -515,26 +502,26 @@ pub mod illust {
         delay_slice: Option<&[i32]>,
         e: impl PgExecutor<'_>,
     ) -> Result<Option<i64>> {
-        // TODO: use latest view to decide whether to insert
         let id = query!(
             "
             insert into pixiv_illust_history (item_id, illust_type, caption_html, title, date, ugoira_frame_duration)
-            select
-                $1,
+            select $1,
                 $2::varchar,
                 $3,
                 $4::varchar,
                 $5,
                 $6
-            where not exists (
-                select id from pixiv_illust_history where 
-                item_id = $1
-                and illust_type IS NOT DISTINCT FROM $2
-                and caption_html IS NOT DISTINCT FROM $3
-                and title IS NOT DISTINCT FROM $4
-                and date IS NOT DISTINCT FROM $5
-                and ugoira_frame_duration IS NOT DISTINCT FROM $6
-            )
+            where not exists(
+                    select id
+                    from pixiv_illust_latest
+                    where id = $1
+                    and illust_type IS NOT DISTINCT FROM $2
+                    and caption_html IS NOT DISTINCT FROM $3
+                    and title IS NOT DISTINCT FROM $4
+                    and date IS NOT DISTINCT FROM $5
+                    and ugoira_frame_duration IS NOT DISTINCT FROM $6
+                    and image_urls IS NOT DISTINCT FROM $7::varchar[]
+                )
             returning id
             ",
             item_id,
@@ -543,6 +530,7 @@ pub mod illust {
             illust.title,
             illust.create_date,
             delay_slice,
+            urls
         )
         .fetch_optional(e)
         .await
@@ -587,24 +575,21 @@ pub mod novel {
         let id = query_unchecked!(
             "
             insert into pixiv_novel (parent_id, source_id, total_bookmarks, total_view,
-                is_bookmarked, tag_ids, source_inaccessible, updated_at)
-            values (
-                (select id from pixiv_user where source_id = $1),
-                $2,
-                $3,
-                $4,
-                $5,
-                (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
-                false,
-                now()
-            )
-            on conflict (source_id) do update set
-                total_bookmarks = $3,
-                total_view = $4,
-                is_bookmarked = $5,
-                tag_ids = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
-                source_inaccessible = false,
-                updated_at = now()
+                                     is_bookmarked, tag_ids, source_inaccessible, updated_at)
+            values ((select id from pixiv_user where source_id = $1),
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
+                    false,
+                    now())
+            on conflict (source_id) do update set total_bookmarks     = $3,
+                                                  total_view          = $4,
+                                                  is_bookmarked       = $5,
+                                                  tag_ids             = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
+                                                  source_inaccessible = false,
+                                                  updated_at          = now()
             returning id
             ",
             n.user.id.to_string(),
@@ -648,20 +633,20 @@ pub mod novel {
         query!(
             "
             insert into pixiv_novel_history (item_id, title, date, caption_html, text)
-            select
-                $1,
-                $2::varchar,
-                $3,
-                $4,
-                $5
-            where not exists (
-                select id from pixiv_novel_history where 
-                item_id = $1
-                and title IS NOT DISTINCT FROM $2
-                and date IS NOT DISTINCT FROM $3
-                and caption_html IS NOT DISTINCT FROM $4
-                and text IS NOT DISTINCT FROM $5
-            )
+            select $1,
+                   $2::varchar,
+                   $3,
+                   $4,
+                   $5
+            where not exists(
+                    select id
+                    from pixiv_novel_latest
+                    where id = $1
+                      and title IS NOT DISTINCT FROM $2
+                      and date IS NOT DISTINCT FROM $3
+                      and caption_html IS NOT DISTINCT FROM $4
+                      and text IS NOT DISTINCT FROM $5
+                )
             ",
             item_id,
             n.title,
