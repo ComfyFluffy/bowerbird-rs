@@ -12,6 +12,8 @@ pub mod log;
 struct Main {
     #[clap(short, long)]
     config: Option<String>,
+    #[clap(long)]
+    skip_migration: bool,
     #[clap(subcommand)]
     subcommand: SubcommandMain,
 }
@@ -71,6 +73,8 @@ async fn run_internal() -> anyhow::Result<()> {
 
     let opts = Main::parse();
 
+    let skip_migration = opts.skip_migration;
+
     let config_builder = || {
         let config_path = if let Some(c) = &opts.config {
             PathBuf::from(c)
@@ -89,7 +93,9 @@ async fn run_internal() -> anyhow::Result<()> {
 
         let db = sqlx::PgPool::connect(&config.postgres_uri).await?;
 
-        migrate(&db).await?;
+        if !skip_migration {
+            migrate(&db).await?;
+        }
         let kit = PixivKit::new(config, db).await?;
 
         anyhow::Ok(kit)
