@@ -205,9 +205,6 @@ create table pixiv_novel_history
     item_id        bigint
         constraint pixiv_novel_history_pixiv_novel_null_fk
             references pixiv_novel,
-    cover_image_id bigint
-        constraint pixiv_novel_history_pixiv_media_null_fk
-            references pixiv_media,
     inserted_at    timestamp with time zone default now(),
     title          varchar(256),
     caption_html   text,

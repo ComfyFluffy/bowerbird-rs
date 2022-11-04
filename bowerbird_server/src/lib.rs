@@ -41,7 +41,6 @@ pub async fn run(kit: PixivKit) -> std::io::Result<()> {
                 .service(pixiv::thumbnail)
                 .service(pixiv::find_illust)
                 .service(pixiv::find_tag)
-                // .service(pixiv::find_image_media)
                 .service(pixiv::find_user);
             let scope_v2 = web::scope("/api/v2").service(scope_pixiv);
 

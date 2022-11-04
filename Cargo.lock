@@ -2108,6 +2108,8 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "pixivcrab"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cbd25c6c8a78468b27122ebcd0a3e3455254894e6dddc02525f44dc2c23b0cc"
 dependencies = [
  "chrono",
  "futures",

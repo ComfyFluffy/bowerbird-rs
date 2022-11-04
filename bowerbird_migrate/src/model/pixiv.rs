@@ -74,8 +74,8 @@ pub struct NovelHistory {
     pub caption_html: String,
     pub title: String,
     pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cover_image_url: Option<String>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub cover_image_url: Option<String>,
     pub image_urls: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<DateTime>,
