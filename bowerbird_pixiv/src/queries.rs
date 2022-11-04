@@ -213,7 +213,7 @@ pub mod user {
                    $14
             where not exists(
                     select id
-                    from pixiv_user_latest
+                    from pixiv_user_detail_latest_view
                     where id = $1
                       and workspace_image_url IS NOT DISTINCT FROM $2
                       and background_url IS NOT DISTINCT FROM $3
@@ -513,7 +513,7 @@ pub mod illust {
                 $6
             where not exists(
                     select id
-                    from pixiv_illust_latest
+                    from pixiv_illust_detail_lateral_view
                     where id = $1
                     and illust_type IS NOT DISTINCT FROM $2
                     and caption_html IS NOT DISTINCT FROM $3
@@ -640,7 +640,7 @@ pub mod novel {
                    $5
             where not exists(
                     select id
-                    from pixiv_novel_latest
+                    from pixiv_novel_detail_latest_view
                     where id = $1
                       and title IS NOT DISTINCT FROM $2
                       and date IS NOT DISTINCT FROM $3

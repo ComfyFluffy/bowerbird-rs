@@ -369,7 +369,7 @@ async fn test_image_order(pg: &Pool<Postgres>) -> anyhow::Result<()> {
     let re = Regex::new(r"p(\d+)").unwrap();
     let r = query!(
         "
-        select id, image_paths from pixiv_illust_latest
+        select id, image_paths from pixiv_illust_detail_latest_view
         "
     )
     .fetch_all(pg)

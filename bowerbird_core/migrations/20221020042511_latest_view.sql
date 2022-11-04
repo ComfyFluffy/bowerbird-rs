@@ -1,4 +1,4 @@
-create view pixiv_user_latest as
+create view pixiv_user_detail_latest_view as
 select i.id          as id,
        h.id             history_id,
        i.inserted_at as inserted_at,
@@ -31,13 +31,13 @@ select i.id          as id,
        workspace
 
 from pixiv_user_history h
-         join (select max(id) id, item_id from pixiv_user_history group by item_id) sub using (id, item_id)
+         join (select max(id) id from pixiv_user_history group by item_id) max_id on max_id.id = h.id
          join pixiv_user i on i.id = h.item_id
          left join pixiv_media ma on ma.id = h.avatar_id
          left join pixiv_media mb on mb.id = h.background_id
          left join pixiv_media mw on mw.id = h.workspace_image_id;
 
-create view pixiv_illust_latest as
+create view pixiv_illust_detail_latest_view as
 select i.id          as                                                id,
        i.parent_id   as                                                parent_id,
        h.id          as                                                history_id,
@@ -58,7 +58,7 @@ select i.id          as                                                id,
        m.urls                                                          image_urls
 
 from pixiv_illust_history h
-         join (select max(id) id, item_id from pixiv_illust_history group by item_id) sub using (id, item_id)
+         join (select max(id) id from pixiv_illust_history group by item_id) max_id on max_id.id = h.id
          join pixiv_illust i on i.id = h.item_id
          left join (select hm.history_id                        history_id,
                            array_agg(url order by hm.id)        urls,
@@ -68,7 +68,39 @@ from pixiv_illust_history h
                     group by hm.history_id) m on m.history_id = h.id
 ;
 
-create view pixiv_novel_latest as
+-- Much faster than above when with an id filter
+create view pixiv_illust_detail_lateral_view as
+select i.id          as                                                id,
+       i.parent_id   as                                                parent_id,
+       h.id          as                                                history_id,
+       i.inserted_at as                                                inserted_at,
+       i.updated_at  as                                                updated_at,
+       source_id,
+       source_inaccessible,
+       tag_ids,
+       total_bookmarks,
+       total_view,
+       is_bookmarked,
+       (select name from pixiv_illust_history_type where id = type_id) illust_type,
+       title,
+       caption_html,
+       date,
+       ugoira_frame_duration,
+       m.paths                                                         image_paths,
+       m.urls                                                          image_urls
+
+from pixiv_illust_history h
+         join pixiv_illust i on i.id = h.item_id
+         left join lateral (select hm.history_id                        history_id,
+                                   array_agg(url order by hm.id)        urls,
+                                   array_agg(local_path order by hm.id) paths
+                            from pixiv_media m
+                                     join pixiv_illust_history_media hm on m.id = hm.media_id
+                            where hm.history_id = h.id
+                            group by hm.history_id) m on m.history_id = h.id
+;
+
+create view pixiv_novel_detail_latest_view as
 select i.id          as id,
        i.parent_id   as parent_id,
        h.id          as history_id,
@@ -85,5 +117,6 @@ select i.id          as id,
        text,
        date
 from pixiv_novel_history h
-         join (select max(id) id, item_id from pixiv_novel_history group by item_id) sub using (id, item_id)
+         join (select max(id) id from pixiv_novel_history group by item_id) max_id on max_id.id = h.id
          join pixiv_novel i on i.id = h.item_id;
+

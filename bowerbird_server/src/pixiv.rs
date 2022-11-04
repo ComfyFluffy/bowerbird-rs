@@ -262,7 +262,7 @@ async fn find_user(
     let r = query_as(
         "
         select count(*) over () _count, *
-        from pixiv_illust_latest
+        from pixiv_illust_detail_latest_view
         where
             ($1 is null or id = any($1))
             and ($2::text is null or name ilike $2)
