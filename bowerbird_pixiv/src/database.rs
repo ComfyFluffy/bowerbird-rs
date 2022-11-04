@@ -3,7 +3,7 @@ use chrono::Utc;
 use log::{info, warn};
 use path_slash::PathBufExt;
 use snafu::ResultExt;
-use sqlx::{query, PgPool};
+use sqlx::PgPool;
 use std::{
     collections::{BTreeSet, HashSet},
     convert::TryInto,
@@ -49,7 +49,7 @@ async fn update_users(
         let updated_at =
             user::upsert_basic_returning_updated_at(&user_id, user.is_followed, &mut tx).await?;
 
-        let avatar_url = user::avatar_url_by_user_id(&user_id, &mut tx).await?;
+        let avatar_url = user::avatar_url_by_source_id(&user_id, &mut tx).await?;
 
         let user_up_to_date = (|| {
             if Some(&user.profile_image_urls.medium) != avatar_url.as_ref() {
@@ -82,22 +82,7 @@ async fn update_tags(
         .collect();
     let mut tx = db.begin().await.context(error::DatabaseTransaction)?;
     for alias in tags {
-        let id = tag::id_by_alias_match(&alias, &mut tx).await?;
-
-        // TODO: use upsert
-        if let Some(id) = id {
-            tag::update_unique(id, &alias, &mut tx).await?;
-        } else {
-            query!(
-                "
-                insert into pixiv_tag (alias) values ($1)
-                ",
-                &alias
-            )
-            .execute(&mut tx)
-            .await
-            .context(error::DatabaseTransaction)?;
-        };
+        tag::upsert_tag(&alias, &mut tx).await?;
     }
     tx.commit().await.context(error::DatabaseTransaction)?;
 

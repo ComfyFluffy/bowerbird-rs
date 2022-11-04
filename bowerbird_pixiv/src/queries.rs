@@ -62,8 +62,8 @@ pub mod user {
 
     use super::*;
 
-    pub async fn avatar_url_by_user_id(
-        user_id: &str,
+    pub async fn avatar_url_by_source_id(
+        source_id: &str,
         e: impl PgExecutor<'_>,
     ) -> Result<Option<String>> {
         Ok(query!(
@@ -78,12 +78,12 @@ pub mod user {
                         order by id desc
                         limit 1)
             ",
-            user_id
+            source_id
         )
         .fetch_optional(e)
         .await
         .with_context(|_| error::Database {
-            message: format!("avatar_url_by_user_id: {:?}", user_id),
+            message: format!("avatar_url_by_user_id: {:?}", source_id),
         })?
         .and_then(|row| row.url))
     }
@@ -96,12 +96,11 @@ pub mod user {
         let updated_at = {
             query!(
                 "
-                insert into pixiv_user (source_id, source_inaccessible, is_followed) values ($1, $2, $3)
-                on conflict (source_id) do update set source_inaccessible = $2, is_followed = $3
+                insert into pixiv_user (source_id, source_inaccessible, is_followed) values ($1, true, $2)
+                on conflict (source_id) do update set source_inaccessible = true, is_followed = $2
                 returning updated_at
                 ",
                 &user_id,
-                true,
                 is_followed
             )
             .fetch_one(e)
@@ -257,40 +256,17 @@ pub mod user {
 pub mod tag {
     use super::*;
 
-    pub async fn id_by_alias_match(
-        alias: &[String],
-        e: impl PgExecutor<'_>,
-    ) -> Result<Option<i64>> {
-        let id = query!(
-            "
-            select id from pixiv_tag where alias && $1::varchar[]
-            order by id asc limit 1
-            ",
-            alias
-        )
-        .fetch_optional(e)
-        .await
-        .with_context(|_| error::Database {
-            message: format!("id_by_alias_match: {:?}", alias),
-        })?
-        .map(|row| row.id);
-        Ok(id)
-    }
-
-    pub async fn update_unique(id: i64, alias: &[String], e: impl PgExecutor<'_>) -> Result<()> {
+    pub async fn upsert_tag(alias: &[String], e: impl PgExecutor<'_>) -> Result<()> {
         query!(
             "
-            update pixiv_tag set
-                alias = ARRAY(select distinct unnest(alias || $1::varchar[]))
-            where id = $2
+            select upsert_pixiv_tag($1)
             ",
-            &alias,
-            id
+            alias
         )
         .execute(e)
         .await
         .with_context(|_| error::Database {
-            message: format!("update_unique: {:?}, {:?}", id, alias),
+            message: format!("upsert_tag: {:?}", alias),
         })?;
         Ok(())
     }
