@@ -240,6 +240,14 @@ pub async fn save_illusts(
 
     for i in illusts {
         let id = i.id.to_string();
+        let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
+        if !i.visible {
+            if i.id != 0 {
+                warn!("pixiv: Works {} is invisible!", id);
+                set_source_inaccessible("pixiv_illust", &id, &mut tx).await?;
+            }
+            continue;
+        }
         let delay = if i.r#type == "ugoira" {
             let ugoira = kit
                 .api
@@ -258,15 +266,6 @@ pub async fn save_illusts(
             None
         };
         let delay_slice = delay.as_deref();
-
-        let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
-        if !i.visible {
-            if i.id != 0 {
-                warn!("pixiv: Works {} is invisible!", id);
-                set_source_inaccessible("pixiv_illust", &id, &mut tx).await?;
-            }
-            continue;
-        }
 
         let item_id = illust::upsert_item_returning_id(i, &mut tx).await?;
 

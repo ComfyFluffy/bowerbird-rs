@@ -40,7 +40,7 @@ pub async fn set_source_inaccessible(
     query(&format!(
         "
         UPDATE {table_name}
-        SET source_inaccessible = 1
+        SET source_inaccessible = true
         WHERE source_id = $1
         "
     ))
