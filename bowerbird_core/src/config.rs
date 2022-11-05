@@ -52,7 +52,7 @@ impl Default for Config {
                 .to_string_lossy()
                 .to_string(),
             proxy_all: "".to_string(),
-            ffmpeg_path: "".to_string(),
+            ffmpeg_path: "ffmpeg".to_string(),
             aria2_path: "aria2c".to_string(),
             ssl_key_log: false,
             pixiv: PixivConfig::default(),

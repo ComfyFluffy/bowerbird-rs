@@ -90,7 +90,8 @@ impl Aria2Downloader {
         Ok(())
     }
 
-    pub async fn wait(&self) {
-        self.waitgroup.clone().await;
+    pub async fn wait_and_shutdown(self) {
+        self.waitgroup.await;
+        let _ = self.client.force_shutdown().await;
     }
 }

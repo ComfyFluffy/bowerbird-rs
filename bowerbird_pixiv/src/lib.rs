@@ -108,8 +108,8 @@ impl PixivKit {
         &self.auth_result.user.id
     }
 
-    pub async fn wait_tasks(&self) {
-        self.downloader.wait().await;
+    pub async fn wait_tasks(self) {
+        self.downloader.wait_and_shutdown().await;
         let _ = self
             .tasks_semaphore
             .acquire_many(self.tasks_initial_permits as u32)
@@ -182,16 +182,16 @@ async fn illusts(
     Ok(())
 }
 
-pub async fn illust_uploads(user_id: &str, limit: Option<u32>, kit: &PixivKit) -> Result<()> {
+pub async fn illust_uploads(kit: &PixivKit, user_id: &str, limit: Option<u32>) -> Result<()> {
     let pager = kit.api.illust_uploads(user_id);
     illusts(limit, pager, kit).await
 }
 
 pub async fn illust_bookmarks(
-    user_id: &str,
-    private: bool,
-    limit: Option<u32>,
     kit: &PixivKit,
+    user_id: &str,
+    limit: Option<u32>,
+    private: bool,
 ) -> Result<()> {
     let pager = kit.api.illust_bookmarks(user_id, private);
     illusts(limit, pager, kit).await
@@ -233,21 +233,21 @@ async fn novels(
 }
 
 pub async fn novel_bookmarks(
+    kit: &PixivKit,
     user_id: &str,
-    private: bool,
     limit: Option<u32>,
     update_exists: bool,
-    kit: &PixivKit,
+    private: bool,
 ) -> Result<()> {
     let pager = kit.api.novel_bookmarks(user_id, private);
     novels(limit, update_exists, pager, kit).await
 }
 
 pub async fn novel_uploads(
+    kit: &PixivKit,
     user_id: &str,
     limit: Option<u32>,
     update_exists: bool,
-    kit: &PixivKit,
 ) -> Result<()> {
     let pager = kit.api.novel_uploads(user_id);
     novels(limit, update_exists, pager, kit).await

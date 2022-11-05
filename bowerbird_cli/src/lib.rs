@@ -114,6 +114,7 @@ async fn run_internal() -> anyhow::Result<()> {
             config_builder()?;
         }
         SubcommandMain::Pixiv(c) => {
+            use bowerbird_pixiv::*;
             let user_id = c.user_id;
             let limit = c.limit;
             let pre_fn = async move {
@@ -125,43 +126,32 @@ async fn run_internal() -> anyhow::Result<()> {
                 };
                 anyhow::Ok((kit, target_user_id))
             };
+            macro_rules! exec_and_wait {
+                ($f:expr, $($args:tt)*) => {
+                    let (kit, target_user_id) = pre_fn.await?;
+                    if let Err(e) = $f(&kit, &target_user_id, $($args)*).await {
+                        error!("{}", e);
+                    }
+                    kit.wait_tasks().await;
+                };
+            }
             match &c.subcommand {
                 SubcommandPixiv::Illust(c) => match &c.subcommand {
                     SubcommandPixivAction::Bookmarks(c) => {
-                        let (kit, target_user_id) = pre_fn.await?;
-                        bowerbird_pixiv::illust_bookmarks(&target_user_id, c.private, limit, &kit)
-                            .await?;
-                        kit.wait_tasks().await;
+                        exec_and_wait!(illust_bookmarks, limit, c.private);
                     }
                     SubcommandPixivAction::Uploads => {
-                        let (kit, target_user_id) = pre_fn.await?;
-                        bowerbird_pixiv::illust_uploads(&target_user_id, limit, &kit).await?;
-                        kit.wait_tasks().await;
+                        exec_and_wait!(illust_uploads, limit);
                     }
                 },
                 SubcommandPixiv::Novel(c) => {
                     let update_exists = c.update_exists;
                     match &c.subcommand {
                         SubcommandPixivAction::Bookmarks(c) => {
-                            let (kit, target_user_id) = pre_fn.await?;
-                            bowerbird_pixiv::novel_bookmarks(
-                                &target_user_id,
-                                c.private,
-                                limit,
-                                update_exists,
-                                &kit,
-                            )
-                            .await?;
+                            exec_and_wait!(novel_bookmarks, limit, update_exists, c.private);
                         }
                         SubcommandPixivAction::Uploads => {
-                            let (kit, target_user_id) = pre_fn.await?;
-                            bowerbird_pixiv::novel_uploads(
-                                &target_user_id,
-                                limit,
-                                update_exists,
-                                &kit,
-                            )
-                            .await?;
+                            exec_and_wait!(novel_uploads, limit, update_exists);
                         }
                     };
                 }
