@@ -185,31 +185,10 @@ async fn find_illust(
         // https://stackoverflow.com/questions/8276383/postgresql-join-to-most-recent-record-between-tables
         "
         select count(*) over() _count,
-               i.id id,
-               i.parent_id parent_id,
-               h.id history_id,
-               source_id,
-               source_inaccessible,
-               total_bookmarks,
-               total_view,
-               is_bookmarked,
-               tag_ids,
-               illust_type,
-               caption_html,
-               title,
-               date,
-               media_ids,
-               (select array_agg(local_path)
-                from pixiv_media m
-                where m.id = any (h.media_ids)
-                group by h.id) image_paths
-                
-        from pixiv_illust_history h
-                 join (select max(id) id, item_id from pixiv_illust_history group by item_id) sub using (id, item_id)
-                 join pixiv_illust i on i.id = h.item_id
-        
+               *
+        from pixiv_illust_detail_latest_view
         where 
-            ($1 is null or i.id = any($1))
+            ($1 is null or id = any($1))
             and ($8::varchar[] is null or tag_ids @> $8)
             and ($9::varchar[] is null or not tag_ids && $9)
             and ($7 is null or array_length($7, 1) is null or parent_id = any($7))
@@ -218,8 +197,7 @@ async fn find_illust(
             and ($5 is null or total_bookmarks >= $5)
             and ($6 is null or total_bookmarks <= $6)
             and ($2::text is null or title ilike $2 or caption_html ilike $2)
-        
-        order by i.id desc
+        order by id desc
         limit $10 offset $11
         ",
     )
@@ -262,11 +240,10 @@ async fn find_user(
     let r = query_as(
         "
         select count(*) over () _count, *
-        from pixiv_illust_detail_latest_view
+        from pixiv_user_detail_latest_view
         where
             ($1 is null or id = any($1))
             and ($2::text is null or name ilike $2)
-
         order by id desc
         limit $3 offset $4
         ",
