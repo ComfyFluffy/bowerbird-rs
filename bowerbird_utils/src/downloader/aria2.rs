@@ -78,8 +78,8 @@ impl Aria2Downloader {
     }
 
     pub async fn add_task(&self, task: Task) -> Result<()> {
-        let hooks = task.hooks.map(|hooks| aria2_ws::TaskHooks {
-            on_complete: Some(self.map_hook(hooks.on_success)),
+        let hooks = task.hooks.map(|hooks| aria2_ws::Callbacks {
+            on_download_complete: Some(self.map_hook(hooks.on_success)),
             on_error: Some(self.map_hook(hooks.on_error)),
         });
         self.client

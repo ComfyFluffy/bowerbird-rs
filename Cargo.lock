@@ -280,9 +280,9 @@ checksum = "983cd8b9d4b02a6dc6ffa557262eb5858a27a0038ffffe21a0f133eaa819a164"
 
 [[package]]
 name = "aria2-ws"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccefee8d03c4fde3ba78f07fdeae82d4d889f9acf43bb0ec353d2f19e8a2c31c"
+checksum = "018e8f6e2f14d3426cb2eb81df8af7f4be54dc8abff246f51d9388fd76574ebb"
 dependencies = [
  "base64",
  "chrono",
@@ -290,7 +290,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "serde_with 1.14.0",
+ "serde_with 2.0.1",
  "snafu",
  "tokio",
  "tokio-tungstenite",
