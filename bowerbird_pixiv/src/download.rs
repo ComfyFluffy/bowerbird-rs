@@ -49,7 +49,7 @@ async fn on_success_ugoira(
         let zip_path = path.clone();
         spawn_blocking(move || ugoira_to_mp4(&ffmpeg_path, &zip_path, ugoira_frame_delay))
             .await
-            .unwrap()?;
+            .expect("on_success_ugoira: spawn_blocking failed")?;
     }
     let zip_size: i64 = tokio::fs::metadata(&path).await?.len().try_into()?;
 
@@ -82,7 +82,7 @@ async fn on_success_image(
         spawn_blocking(move || get_image_metadata(image_path))
     }
     .await
-    .unwrap()
+    .expect("on_success_image: spawn_blocking failed")
     {
         Ok(m) => Some(m),
         Err(e) => {

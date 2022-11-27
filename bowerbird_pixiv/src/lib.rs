@@ -171,7 +171,7 @@ impl PixivKit {
             .tasks_semaphore
             .acquire_many(self.tasks_initial_permits as u32)
             .await
-            .unwrap();
+            .expect("wait_tasks: failed to acquire tasks semaphore");
     }
 
     pub fn spawn_limited<F>(&self, f: F)
@@ -180,7 +180,10 @@ impl PixivKit {
     {
         let semaphore = self.tasks_semaphore.clone();
         spawn(async move {
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore
+                .acquire()
+                .await
+                .expect("spawn_limited: failed to acquire permit");
             if let Err(e) = f.await {
                 error!("task error: {}", e);
             }

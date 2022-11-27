@@ -101,7 +101,10 @@ pub fn ugoira_to_mp4(
         .stdin(Stdio::piped())
         .spawn()?;
     {
-        let mut stdin = ffmpeg.stdin.take().unwrap();
+        let mut stdin = ffmpeg
+            .stdin
+            .take()
+            .expect("failed to take stdin from ffmpeg");
 
         let mut t: f32 = 0.0; // video length in milliseconds
         let mut frame = 0;
