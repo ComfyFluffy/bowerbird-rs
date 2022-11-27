@@ -1,15 +1,18 @@
 use bowerbird_core::config::Config;
 use bowerbird_utils::{check_ffmpeg, downloader::Aria2Downloader, logged_rustls_with_native_root};
 use futures::Future;
-use log::{debug, error, info};
-use pixivcrab::AppApi;
+use log::{debug, error, info, warn};
+use pixivcrab::{AppApi, Pager};
 use reqwest::ClientBuilder;
+use serde::de::DeserializeOwned;
 use snafu::ResultExt;
 use sqlx::PgPool;
 use std::{
     collections::{BTreeSet, HashMap},
+    fmt::Debug,
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 use tokio::{spawn, sync::Semaphore};
 
@@ -48,8 +51,47 @@ pub struct PixivKit {
     pub task_config: TaskConfig,
     pub config: Config,
     pub auth_result: pixivcrab::AuthResult,
+    pub max_tries: i32,
     tasks_semaphore: Arc<Semaphore>,
     tasks_initial_permits: usize,
+}
+
+macro_rules! retry_impl {
+    ($fut:expr, $max_tries:expr) => {
+        use pixivcrab::error::Error;
+
+        let mut tries = 1;
+        loop {
+            match $fut.await {
+                Ok(r) => {
+                    return Ok(r);
+                }
+                Err(e) => {
+                    match &e {
+                        Error::Http { .. } => {
+                            if tries < $max_tries {
+                                warn!("retrying on pixiv api error: {}", e);
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                                tries += 1;
+                                continue;
+                            }
+                        }
+                        Error::UnexpectedStatus { status, text } => {
+                            if status.as_u16() == 403
+                                && text.to_ascii_lowercase().contains("rate limit")
+                            {
+                                warn!("pixiv api rate limit reached, will retry in 60s: {}", e);
+                                tokio::time::sleep(Duration::from_secs(60)).await;
+                                continue;
+                            }
+                        }
+                        _ => (),
+                    };
+                    return Err(e).context(error::PixivApi);
+                }
+            }
+        }
+    };
 }
 
 impl PixivKit {
@@ -101,11 +143,26 @@ impl PixivKit {
             task_config,
             config,
             auth_result,
+            max_tries: 3,
         })
     }
 
     pub fn current_user_id(&self) -> &str {
         &self.auth_result.user.id
+    }
+
+    pub async fn retry_pager<T>(&self, pager: &mut Pager<T>) -> Result<Option<T>>
+    where
+        T: DeserializeOwned + pixivcrab::NextUrl + Debug + Send,
+    {
+        retry_impl!(pager.next(), self.max_tries);
+    }
+
+    pub async fn retry_api<'a, T, Fut>(&'a self, mut f: impl FnMut(&'a AppApi) -> Fut) -> Result<T>
+    where
+        Fut: Future<Output = std::result::Result<T, pixivcrab::error::Error>>,
+    {
+        retry_impl!(f(&self.api), self.max_tries);
     }
 
     pub async fn wait_tasks(self) {
@@ -151,7 +208,7 @@ async fn illusts(
     let mut ugoira_map: HashMap<String, (String, Vec<i32>)> = HashMap::new();
     while let Some(r) = {
         info!("getting illusts with offset: {}", items_sent);
-        utils::retry_pager(&mut pager, 3).await?
+        kit.retry_pager(&mut pager).await?
     } {
         database::save_illusts(
             &r.illusts,
@@ -208,7 +265,7 @@ async fn novels(
 
     while let Some(r) = {
         info!("getting novels with offset: {}", items_sent);
-        utils::retry_pager(&mut pager, 3).await?
+        kit.retry_pager(&mut pager).await?
     } {
         debug!("novels: {:?}", r);
         database::save_novels(
@@ -273,6 +330,6 @@ mod tests {
             .await
             .unwrap();
         let kit = PixivKit::new(generate_config(), db).await.unwrap();
-        illust_bookmarks(&uid, false, Some(10), &kit).await.unwrap();
+        illust_bookmarks(&kit, &uid, Some(10), false).await.unwrap();
     }
 }

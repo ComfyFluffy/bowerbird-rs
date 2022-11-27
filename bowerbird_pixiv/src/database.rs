@@ -93,24 +93,15 @@ pub async fn update_user_id_set(
     users_need_update_set: BTreeSet<String>,
     kit: &PixivKit,
 ) -> Result<()> {
-    let need_sleep = users_need_update_set.len() > kit.config.pixiv.user_update_sleep_threshold;
-    // Sleep for 500ms to avoid 403 error
     for user_id in users_need_update_set {
         try_skip!(update_user_detail(&user_id, kit).await);
-        if need_sleep {
-            tokio::time::sleep(kit.config.pixiv.user_update_sleep_interval).await;
-        }
     }
     Ok(())
 }
 
 async fn update_user_detail(user_id: &str, kit: &PixivKit) -> Result<()> {
     info!("updating pixiv user data: {}", user_id);
-    let resp = kit
-        .api
-        .user_detail(user_id)
-        .await
-        .context(error::PixivApi)?;
+    let resp = kit.retry_api(|api| api.user_detail(user_id)).await?;
 
     let user = resp.user;
     let profile = resp.profile;
@@ -249,11 +240,7 @@ pub async fn save_illusts(
             continue;
         }
         let delay = if i.r#type == "ugoira" {
-            let ugoira = kit
-                .api
-                .ugoira_metadata(&id)
-                .await
-                .context(error::PixivApi)?;
+            let ugoira = kit.retry_api(|api| api.ugoira_metadata(&id)).await?;
             let delay: Vec<i32> = ugoira
                 .ugoira_metadata
                 .frames
@@ -312,7 +299,7 @@ pub async fn save_novels(
     for n in novels {
         let id = n.id.to_string();
         info!("pixiv: getting novel text of {}", id);
-        let r = kit.api.novel_text(&id).await.context(error::PixivApi)?;
+        let r = kit.retry_api(|api| api.novel_text(&id)).await?;
 
         let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
         if !on_each_should_continue() {

@@ -1,17 +1,11 @@
 use anyhow::anyhow;
 use chrono::NaiveDate;
 use lazy_static::lazy_static;
-use log::warn;
-use pixivcrab::Pager;
 use regex::Regex;
-use serde::de::DeserializeOwned;
-use snafu::ResultExt;
 use std::{
-    fmt::Debug,
     fs::File,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
 };
 use url::Url;
 
@@ -130,32 +124,6 @@ pub fn ugoira_to_mp4(
         Err(anyhow!("ffmpeg exited with status {status}"))?
     }
     Ok(mp4_path)
-}
-
-pub async fn retry_pager<T>(pager: &mut Pager<T>, max_tries: i32) -> Result<Option<T>>
-where
-    T: DeserializeOwned + pixivcrab::NextUrl + Debug + Send,
-{
-    let mut tries = 0;
-    loop {
-        tries += 1;
-        match pager.next().await {
-            Ok(r) => {
-                return Ok(r);
-            }
-            Err(e) => {
-                println!("error: {:?}", e);
-                if let pixivcrab::error::Error::Http { .. } = &e {
-                    if tries <= max_tries {
-                        warn!("retrying on pixiv api error: {}", e);
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                        continue;
-                    }
-                }
-                return Err(e).context(error::PixivApi);
-            }
-        }
-    }
 }
 
 pub fn filename_from_url(url: &str) -> Result<String> {

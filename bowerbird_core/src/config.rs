@@ -73,9 +73,6 @@ pub struct PixivConfig {
 
     #[serde_as(as = "DurationSeconds<u64>")]
     pub user_need_update_interval: Duration,
-    pub user_update_sleep_threshold: usize,
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub user_update_sleep_interval: Duration,
 }
 
 impl Default for PixivConfig {
@@ -87,8 +84,6 @@ impl Default for PixivConfig {
             refresh_token: "".to_string(),
             language: "en".to_string(),
             user_need_update_interval: chrono::Duration::days(7).to_std().unwrap(),
-            user_update_sleep_threshold: 100,
-            user_update_sleep_interval: Duration::from_secs(1),
         }
     }
 }
