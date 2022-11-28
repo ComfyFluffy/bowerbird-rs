@@ -109,7 +109,7 @@ impl PixivKit {
             api_client = api_client.proxy(proxy);
         }
         let mut api_config = pixivcrab::AppApiConfig::default();
-        api_config.set_language(&config.pixiv.language);
+        api_config.set_language_header_value((*config.pixiv.language).clone());
         let api = pixivcrab::AppApi::new_with_config(
             pixivcrab::AuthMethod::RefreshToken(config.pixiv.refresh_token.clone()),
             api_client,

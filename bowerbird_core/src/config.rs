@@ -60,6 +60,83 @@ impl Default for Config {
         }
     }
 }
+mod serde_header_value {
+    use reqwest::header::HeaderValue;
+    use serde::{de::Visitor, Deserialize, Serialize};
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct SerdeHeaderValue(pub HeaderValue);
+
+    impl std::ops::Deref for SerdeHeaderValue {
+        type Target = HeaderValue;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    struct StrVisitor;
+    impl<'de> Visitor<'de> for StrVisitor {
+        type Value = SerdeHeaderValue;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a valid http header value")
+        }
+
+        fn visit_str<E>(self, v: &str) -> std::result::Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(SerdeHeaderValue(
+                HeaderValue::from_str(v).map_err(serde::de::Error::custom)?,
+            ))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SerdeHeaderValue {
+        fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_str(StrVisitor)
+        }
+    }
+
+    impl Serialize for SerdeHeaderValue {
+        fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(self.0.to_str().map_err(serde::ser::Error::custom)?)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_serde_header_value() {
+            let header = HeaderValue::from_str("Bearer token").unwrap();
+            let serde_header = SerdeHeaderValue(header.clone());
+            let json = serde_json::to_string(&serde_header).unwrap();
+            assert_eq!(json, r#""Bearer token""#);
+            let serde_header: SerdeHeaderValue = serde_json::from_str(&json).unwrap();
+            assert_eq!(serde_header.0, header);
+        }
+
+        #[test]
+        fn test_invalid_header_value() {
+            let json = r#""Bearer token""
+            "#;
+            let serde_header: Result<SerdeHeaderValue, _> = serde_json::from_str(json);
+            assert!(serde_header.is_err());
+        }
+    }
+}
+
+pub use reqwest::header::HeaderValue;
+pub use serde_header_value::SerdeHeaderValue;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -69,7 +146,7 @@ pub struct PixivConfig {
     pub proxy_api: String,
     pub proxy_download: String,
     pub refresh_token: String,
-    pub language: String,
+    pub language: SerdeHeaderValue,
 
     #[serde_as(as = "DurationSeconds<u64>")]
     pub user_need_update_interval: Duration,
@@ -82,7 +159,7 @@ impl Default for PixivConfig {
             proxy_download: "".to_string(),
             storage_dir: "pixiv".to_string(),
             refresh_token: "".to_string(),
-            language: "en".to_string(),
+            language: SerdeHeaderValue("en".parse().unwrap()),
             user_need_update_interval: chrono::Duration::days(7).to_std().unwrap(),
         }
     }
