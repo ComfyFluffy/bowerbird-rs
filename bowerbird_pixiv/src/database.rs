@@ -217,7 +217,7 @@ pub async fn save_image_ugoira(
 }
 
 pub async fn save_illusts(
-    illusts: &Vec<pixivcrab::models::illust::Illust>,
+    illusts: &[pixivcrab::models::illust::Illust],
     kit: &PixivKit,
     on_user_need_update: impl FnMut(&str),
     mut on_ugoira_metadata: impl FnMut(&str, (&str, &[i32])),
@@ -283,7 +283,7 @@ pub async fn save_illusts(
 }
 
 pub async fn save_novels(
-    novels: &Vec<pixivcrab::models::novel::Novel>,
+    novels: &[pixivcrab::models::novel::Novel],
     update_exists: bool,
     kit: &PixivKit,
     mut on_each_should_continue: impl FnMut() -> bool,

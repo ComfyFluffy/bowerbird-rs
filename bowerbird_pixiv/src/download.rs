@@ -219,7 +219,7 @@ fn build_task(
 }
 
 pub async fn download_illusts(
-    illusts: &Vec<pixivcrab::models::illust::Illust>,
+    illusts: &[pixivcrab::models::illust::Illust],
     ugoira_map: &mut HashMap<String, (String, Vec<i32>)>,
     mut on_each_should_continue: impl FnMut() -> bool,
     kit: &PixivKit,
