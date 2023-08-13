@@ -551,7 +551,8 @@ pub mod novel {
         let id = query_unchecked!(
             "
             insert into pixiv_novel (parent_id, source_id, total_bookmarks, total_view,
-                                     is_bookmarked, tag_ids, source_inaccessible, updated_at)
+                                     is_bookmarked, tag_ids, source_inaccessible, updated_at,
+                                     series_id)
             values ((select id from pixiv_user where source_id = $1),
                     $2,
                     $3,
@@ -559,13 +560,15 @@ pub mod novel {
                     $5,
                     (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
                     false,
-                    now())
-            on conflict (source_id) do update set total_bookmarks     = $3,
-                                                  total_view          = $4,
-                                                  is_bookmarked       = $5,
-                                                  tag_ids             = (select array_agg(id) from pixiv_tag where alias && $6::varchar[]),
+                    now(),
+                    (select id from pixiv.novel_series where source_id = $7))
+            on conflict (source_id) do update set total_bookmarks     = excluded.total_bookmarks,
+                                                  total_view          = excluded.total_view,
+                                                  is_bookmarked       = excluded.is_bookmarked,
+                                                  tag_ids             = excluded.tag_ids,
                                                   source_inaccessible = false,
-                                                  updated_at          = now()
+                                                  updated_at          = now(),
+                                                  series_id           = excluded.series_id
             returning id
             ",
             n.user.id.to_string(),
@@ -573,7 +576,8 @@ pub mod novel {
             n.total_bookmarks,
             n.total_view,
             n.is_bookmarked,
-            alias
+            alias,
+            n.series.as_ref().map(|s| s.id.to_string())
         )
         .fetch_one(e)
         .await
@@ -634,6 +638,31 @@ pub mod novel {
         .await
         .with_context(|_| error::Database {
             message: format!("insert_history: {:?}, {:?}", item_id, n),
+        })?;
+
+        Ok(())
+    }
+
+    pub async fn upsert_novel_series(
+        series: impl Iterator<Item = &pixivcrab::models::Series>,
+        e: impl PgExecutor<'_>,
+    ) -> Result<()> {
+        let (source_ids, titles): (Vec<_>, Vec<_>) =
+            series.map(|s| (s.id.to_string(), s.title.as_str())).unzip();
+
+        query_unchecked!(
+            "
+            insert into pixiv.novel_series (source_id, title)
+            select * from unnest($1::varchar[], $2::varchar[])
+            on conflict (source_id) do update set title = excluded.title
+            ",
+            &source_ids,
+            &titles
+        )
+        .execute(e)
+        .await
+        .with_context(|_| error::Database {
+            message: format!("upsert_novel_series: {:?}, {:?}", source_ids, titles),
         })?;
 
         Ok(())

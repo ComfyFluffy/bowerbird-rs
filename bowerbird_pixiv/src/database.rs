@@ -5,13 +5,13 @@ use path_slash::PathBufExt;
 use snafu::ResultExt;
 use sqlx::PgPool;
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     convert::TryInto,
     path::{Path, PathBuf},
     time::Duration,
 };
 
-use crate::{download::download_other_image, error};
+use crate::{download::download_other_image, error, queries};
 use crate::{queries::*, Result};
 
 use super::PixivKit;
@@ -234,9 +234,10 @@ pub async fn save_illusts(
         let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
         if !i.visible {
             if i.id != 0 {
-                warn!("pixiv: Works {} is invisible!", id);
+                warn!("pixiv: Illust {} is invisible!", id);
                 set_source_inaccessible("pixiv_illust", &id, &mut tx).await?;
             }
+            tx.commit().await.context(error::DatabaseTransaction)?;
             continue;
         }
         let delay = if i.r#type == "ugoira" {
@@ -296,28 +297,41 @@ pub async fn save_novels(
         on_user_need_update
     );
 
-    for n in novels {
-        let id = n.id.to_string();
-        info!("pixiv: getting novel text of {}", id);
-        let r = kit.retry_api(|api| api.novel_text(&id)).await?;
+    let series: HashMap<_, _> = novels
+        .iter()
+        .filter_map(|n| n.series.as_ref())
+        .map(|s| (s.id, s))
+        .collect();
+    novel::upsert_novel_series(series.values().map(|v| *v), &kit.db).await?;
 
-        let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
+    for n in novels {
         if !on_each_should_continue() {
             return Ok(());
         }
-        if !n.visible {
-            if n.id != 0 {
-                set_source_inaccessible("pixiv_novel", &id, &mut tx).await?;
-            }
-            continue;
-        }
+
+        let mut tx = kit.db.begin().await.context(error::DatabaseTransaction)?;
+
+        let id = n.id.to_string();
 
         let item_id = novel::upsert_item_returning_id(n, &mut tx).await?;
 
-        let history_exists = novel::history_exists(item_id, &mut tx).await?;
-        if history_exists && !update_exists {
+        if !n.visible {
+            if n.id != 0 {
+                warn!("pixiv: Novel {} is invisible!", id);
+                set_source_inaccessible("pixiv_novel", &id, &mut tx).await?;
+            }
+            tx.commit().await.context(error::DatabaseTransaction)?;
             continue;
         }
+
+        let history_exists = novel::history_exists(item_id, &mut tx).await?;
+        if history_exists && !update_exists {
+            tx.commit().await.context(error::DatabaseTransaction)?;
+            continue;
+        }
+
+        info!("pixiv: getting novel text of {}", id);
+        let r = kit.retry_api(|api| api.novel_text(&id)).await?;
 
         novel::insert_history(item_id, n, &r.novel_text, &mut tx).await?;
         tx.commit().await.context(error::DatabaseTransaction)?;
