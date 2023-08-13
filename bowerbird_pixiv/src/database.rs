@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{download::download_other_image, error, queries};
+use crate::{download::download_other_image, error};
 use crate::{queries::*, Result};
 
 use super::PixivKit;
