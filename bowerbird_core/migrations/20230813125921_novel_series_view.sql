@@ -19,5 +19,5 @@ select i.id          as id,
 from pixiv_novel_history h
          join (select max(id) id from pixiv_novel_history group by item_id) max_id on max_id.id = h.id
          join pixiv_novel i on i.id = h.item_id
-         join pixiv.novel_series s on s.id = i.series_id
+         left join pixiv.novel_series s on s.id = i.series_id
 ;
